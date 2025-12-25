@@ -6,6 +6,10 @@ struct ChatListView: View {
     @StateObject private var viewModel = ChatListViewModel()
     @State private var showNewChat = false
     @State private var searchText = ""
+    
+    // SwiftData context
+    @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject var appState: AppState
 
     var body: some View {
         NavigationStack {
@@ -53,6 +57,19 @@ struct ChatListView: View {
                 NewChatView()
             }
             .task {
+                // Configure ChatListViewModel with SwiftData context
+                guard let currentUserId = appState.currentUserId else {
+                    NetworkLogger.shared.log("⚠️ No current user ID in AppState")
+                    await viewModel.loadChats()
+                    viewModel.startPolling()
+                    return
+                }
+                
+                viewModel.configure(
+                    modelContext: modelContext,
+                    currentUserId: currentUserId
+                )
+                
                 await viewModel.loadChats()
                 viewModel.startPolling()
             }
@@ -205,6 +222,10 @@ struct ChatDetailView: View {
     @State private var messageText = ""
     @State private var isTyping = false // TODO: Connect to backend typing events
     @FocusState private var isMessageFocused: Bool
+    
+    // SwiftData context
+    @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject var appState: AppState
 
     init(chat: ChatInfo) {
         self.chat = chat
@@ -317,8 +338,45 @@ struct ChatDetailView: View {
             }
         }
         .task {
+            // Configure viewModel with SwiftData context
+            guard let currentUserId = appState.currentUserId else {
+                NetworkLogger.shared.log("⚠️ No current user ID in AppState")
+                return
+            }
+            
+            // Generate or fetch chatId (use deterministic ID based on user IDs)
+            let chatId = generateChatId(userId1: currentUserId, userId2: UUID(uuidString: chat.userId) ?? UUID())
+            
+            viewModel.configure(
+                modelContext: modelContext,
+                currentUserId: currentUserId,
+                chatId: chatId
+            )
+            
             await viewModel.loadMessages()
         }
+    }
+    
+    // Generate deterministic chat ID from two user IDs
+    private func generateChatId(userId1: UUID, userId2: UUID) -> UUID {
+        // Sort UUIDs to ensure same chatId regardless of order
+        let sorted = [userId1, userId2].sorted { $0.uuidString < $1.uuidString }
+        let combined = sorted[0].uuidString + sorted[1].uuidString
+        
+        // Generate deterministic UUID from combined string
+        var hasher = Hasher()
+        hasher.combine(combined)
+        let hashValue = hasher.finalize()
+        
+        // Convert hash to UUID-like string
+        let uuidString = String(format: "%08X-%04X-%04X-%04X-%012X",
+                               (hashValue >> 96) & 0xFFFFFFFF,
+                               (hashValue >> 80) & 0xFFFF,
+                               (hashValue >> 64) & 0xFFFF,
+                               (hashValue >> 48) & 0xFFFF,
+                               hashValue & 0xFFFFFFFFFFFF)
+        
+        return UUID(uuidString: uuidString) ?? UUID()
     }
 
     private func sendMessage() {

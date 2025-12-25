@@ -12,13 +12,84 @@ class ChatViewModel: ObservableObject {
 
     let otherUserId: String
     let otherUserName: String
+    
+    // SwiftData context for persistence
+    private var modelContext: ModelContext?
+    private var currentUserId: UUID?
+    private var chatId: UUID?
+    
+    // Notification observer
+    private var cancellables = Set<AnyCancellable>()
 
     init(otherUserId: String, otherUserName: String) {
         self.otherUserId = otherUserId
         self.otherUserName = otherUserName
+        
+        // Listen for new messages
+        setupNotificationListener()
+    }
+    
+    // Setup notification listener for new messages
+    private func setupNotificationListener() {
+        NotificationCenter.default.publisher(for: NSNotification.Name("NewMessageReceived"))
+            .sink { [weak self] notification in
+                guard let self = self,
+                      let userInfo = notification.userInfo,
+                      let notificationChatId = userInfo["chatId"] as? String,
+                      let message = userInfo["message"] as? Message,
+                      let myChatId = self.chatId?.uuidString,
+                      notificationChatId == myChatId else {
+                    return
+                }
+                
+                // Add message to UI if not already there
+                Task { @MainActor in
+                    if !self.messages.contains(where: { $0.id == message.id }) {
+                        self.messages.append(message)
+                        NetworkLogger.shared.log("✅ New message added to chat UI")
+                        HapticManager.shared.light()
+                    }
+                }
+            }
+            .store(in: &cancellables)
+    }
+    
+    // Configure with SwiftData context and user info
+    func configure(modelContext: ModelContext, currentUserId: UUID, chatId: UUID) {
+        self.modelContext = modelContext
+        self.currentUserId = currentUserId
+        self.chatId = chatId
+        
+        // Load messages from local DB
+        Task {
+            await loadMessagesFromLocalDB()
+        }
     }
 
     // MARK: - Load Messages
+    
+    /// Load messages from local SwiftData database
+    private func loadMessagesFromLocalDB() async {
+        guard let modelContext = modelContext,
+              let chatId = chatId else {
+            NetworkLogger.shared.log("⚠️ ModelContext or chatId not configured")
+            return
+        }
+        
+        do {
+            let descriptor = FetchDescriptor<Message>(
+                predicate: #Predicate { $0.chatId == chatId },
+                sortBy: [SortDescriptor(\.timestamp, order: .forward)]
+            )
+            
+            let fetchedMessages = try modelContext.fetch(descriptor)
+            messages = fetchedMessages
+            
+            NetworkLogger.shared.log("✅ Loaded \(messages.count) messages from local DB")
+        } catch {
+            NetworkLogger.shared.log("❌ Error loading from SwiftData: \(error)")
+        }
+    }
 
     func loadMessages() async {
         guard let token = getToken() else {
@@ -72,10 +143,14 @@ class ChatViewModel: ObservableObject {
 
             NetworkLogger.shared.log("✅ Message sent (encrypted): \(response.messageId)")
 
-            // 3. Add to local messages (optimistic UI)
-            // TODO: Get proper senderId and chatId from app state
-            let currentUserId = UUID() // Replace with actual current user ID
-            let chatId = UUID() // Replace with actual chat ID
+            // 3. Save to local SwiftData (with proper IDs)
+            guard let currentUserId = currentUserId,
+                  let chatId = chatId,
+                  let modelContext = modelContext else {
+                NetworkLogger.shared.log("⚠️ Missing context for saving message")
+                isSending = false
+                return
+            }
             
             // Convert String messageId to UUID
             guard let messageUUID = UUID(uuidString: response.messageId) else {
@@ -84,18 +159,32 @@ class ChatViewModel: ObservableObject {
                 return
             }
             
+            guard let recipientUUID = UUID(uuidString: otherUserId) else {
+                NetworkLogger.shared.log("⚠️ Invalid recipient ID format: \(otherUserId)")
+                isSending = false
+                return
+            }
+            
             let newMessage = Message(
                 id: messageUUID,
                 content: text, // Store decrypted locally
                 senderId: currentUserId,
-                recipientId: UUID(uuidString: otherUserId) ?? UUID(),
+                recipientId: recipientUUID,
                 chatId: chatId,
                 contentType: .text,
                 status: .sent,
                 isFromCurrentUser: true,
                 timestamp: Date()
             )
+            
+            // Save to SwiftData
+            modelContext.insert(newMessage)
+            try modelContext.save()
+            
+            // Add to UI
             messages.append(newMessage)
+            
+            NetworkLogger.shared.log("💾 Message saved to local DB")
 
             // Success haptic
             HapticManager.shared.success()

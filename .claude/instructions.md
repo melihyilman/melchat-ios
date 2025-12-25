@@ -6,6 +6,30 @@ You are helping develop **MelChat**, a privacy-first, end-to-end encrypted messa
 
 ---
 
+## 🚨 BEFORE YOU START: Backend Required!
+
+**iOS app WILL NOT work without backend running!**
+
+### Quick Backend Start:
+
+```bash
+# Method 1: Docker Compose (Recommended)
+cd /Users/melih/dev/melchat
+docker-compose up -d
+
+# Method 2: Manual
+cd /Users/melih/dev/melchat/backend
+npx tsx test-server.ts
+```
+
+**Check it's running:**
+- http://localhost:3000/health → `{"status":"ok"}`
+- http://localhost:3000/docs → Swagger docs visible
+
+**Full details:** See `BACKEND_QUICKSTART.md`
+
+---
+
 ## 📚 MANDATORY: Always Read These Files First
 
 Before making ANY code changes, you MUST read these files in order:

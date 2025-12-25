@@ -70,6 +70,11 @@ class AuthViewModel: ObservableObject {
 
             // Save token
             try keychainHelper.save(response.token.data(using: .utf8)!, forKey: KeychainHelper.Keys.authToken)
+            
+            // Save user info to UserDefaults for Settings
+            UserDefaults.standard.set(response.user.username, forKey: "username")
+            UserDefaults.standard.set(response.user.displayName, forKey: "displayName")
+            UserDefaults.standard.set(email, forKey: "email")
 
             // Login with UUID
             appState?.login(userId: userId, token: response.token)
