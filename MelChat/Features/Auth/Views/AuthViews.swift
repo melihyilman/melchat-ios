@@ -7,184 +7,257 @@ struct LoginView: View {
     @StateObject private var viewModel = AuthViewModel()
     @State private var email = ""
     @FocusState private var isEmailFocused: Bool
+    @State private var isLogoAnimating = false
+    @State private var showContent = false
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                // Background gradient
-                LinearGradient(
-                    colors: [Color(.systemBackground), Color.blue.opacity(0.1)],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .ignoresSafeArea()
+            GeometryReader { geometry in
+                ZStack {
+                    // Animated Background gradient
+                    AnimatedGradientBackground()
 
-                ScrollView {
-                    VStack(spacing: 40) {
-                        Spacer().frame(height: 80)
-
-                        // Logo & Title
-                        VStack(spacing: 16) {
-                            ZStack {
-                                Circle()
-                                    .fill(Color.blue.gradient)
-                                    .frame(width: 100, height: 100)
-                                    .shadow(color: .blue.opacity(0.3), radius: 20, y: 10)
-
-                                Image(systemName: "lock.shield.fill")
-                                    .font(.system(size: 50))
-                                    .foregroundStyle(.white)
-                            }
-
-                            VStack(spacing: 8) {
-                                Text("MelChat")
-                                    .font(.system(size: 42, weight: .bold, design: .rounded))
-
-                                Text("Privacy-First Messaging")
-                                    .font(.title3)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-
-                        Spacer().frame(height: 40)
-
-                        // Sign In Options
-                        VStack(spacing: 20) {
-                            // Apple Sign In (Coming Soon)
-                            Button {
-                                // TODO: Implement Apple Sign In
-                            } label: {
-                                HStack {
-                                    Image(systemName: "apple.logo")
-                                        .font(.title3.bold())
-
-                                    Text("Continue with Apple")
-                                        .font(.headline)
+                    ScrollView {
+                        VStack(spacing: 0) {
+                            // Top section - Logo & Welcome
+                            VStack(spacing: 16) {
+                                Spacer()
+                                    .frame(height: isEmailFocused ? geometry.size.height * 0.02 : geometry.size.height * 0.08)
+                                    .animation(.spring(response: 0.4), value: isEmailFocused)
+                                    .id("top-spacer") // ID for scroll target
+                                
+                                // Animated Logo
+                                ZStack {
+                                    // Pulsing outer circle
+                                    Circle()
+                                        .fill(Color.blue.opacity(0.2))
+                                        .frame(width: isEmailFocused ? 60 : 90, height: isEmailFocused ? 60 : 90)
+                                        .scaleEffect(isLogoAnimating ? 1.2 : 1.0)
+                                        .opacity(isLogoAnimating ? 0 : 0.5)
+                                        .animation(
+                                            .easeInOut(duration: 2.0).repeatForever(autoreverses: false),
+                                            value: isLogoAnimating
+                                        )
+                                    
+                                    // Main logo circle
+                                    Circle()
+                                        .fill(
+                                            LinearGradient(
+                                                colors: [Color.blue, Color.blue.opacity(0.7), Color.cyan.opacity(0.8)],
+                                                startPoint: .topLeading,
+                                                endPoint: .bottomTrailing
+                                            )
+                                        )
+                                        .frame(width: isEmailFocused ? 50 : 70, height: isEmailFocused ? 50 : 70)
+                                        .shadow(color: .blue.opacity(0.4), radius: 15, y: 8)
+                                        .scaleEffect(showContent ? 1.0 : 0.5)
+                                        .opacity(showContent ? 1.0 : 0)
+                                    
+                                    // Lock icon
+                                    Image(systemName: "lock.shield.fill")
+                                        .font(.system(size: isEmailFocused ? 25 : 35))
+                                        .foregroundStyle(.white)
+                                        .rotationEffect(.degrees(showContent ? 0 : -180))
+                                        .opacity(showContent ? 1.0 : 0)
                                 }
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 56)
-                                .background(Color.black)
-                                .foregroundStyle(.white)
-                                .clipShape(RoundedRectangle(cornerRadius: 16))
-                                .shadow(color: .black.opacity(0.1), radius: 10, y: 5)
-                            }
-                            .disabled(true)
-                            .opacity(0.6)
+                                .animation(.spring(response: 0.4), value: isEmailFocused)
 
-                            // Divider
-                            HStack(spacing: 16) {
-                                Rectangle()
-                                    .fill(Color.gray.opacity(0.3))
-                                    .frame(height: 1)
+                                VStack(spacing: 6) {
+                                    Text("MelChat")
+                                        .font(.system(size: isEmailFocused ? 24 : 32, weight: .bold, design: .rounded))
+                                        .offset(y: showContent ? 0 : 15)
+                                        .opacity(showContent ? 1.0 : 0)
+                                        .animation(.spring(response: 0.4), value: isEmailFocused)
 
-                                Text("or")
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-
-                                Rectangle()
-                                    .fill(Color.gray.opacity(0.3))
-                                    .frame(height: 1)
-                            }
-                            .padding(.vertical, 8)
-
-                            // Email Input
-                            VStack(alignment: .leading, spacing: 12) {
-                                Text("Email Address")
-                                    .font(.callout.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-                                    .padding(.leading, 4)
-
-                                HStack(spacing: 12) {
-                                    Image(systemName: "envelope.fill")
-                                        .font(.title3)
-                                        .foregroundStyle(.secondary)
-
-                                    TextField("your@email.com", text: $email)
-                                        .textFieldStyle(.plain)
-                                        .keyboardType(.emailAddress)
-                                        .autocapitalization(.none)
-                                        .textContentType(.emailAddress)
-                                        .submitLabel(.continue)
-                                        .focused($isEmailFocused)
-                                        .onSubmit {
-                                            if !email.isEmpty {
-                                                Task { await viewModel.sendCode(email: email) }
-                                            }
-                                        }
-                                }
-                                .padding()
-                                .background(
-                                    RoundedRectangle(cornerRadius: 16)
-                                        .fill(Color(.systemBackground))
-                                        .shadow(color: .black.opacity(0.05), radius: 10, y: 5)
-                                )
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 16)
-                                        .stroke(isEmailFocused ? Color.blue : Color.clear, lineWidth: 2)
-                                )
-                            }
-
-                            // Continue Button
-                            Button {
-                                isEmailFocused = false
-                                Task { await viewModel.sendCode(email: email) }
-                            } label: {
-                                HStack {
-                                    Text(viewModel.isLoading ? "Sending..." : "Continue")
-                                        .font(.headline)
-
-                                    if !viewModel.isLoading {
-                                        Image(systemName: "arrow.right")
-                                            .font(.headline)
+                                    if !isEmailFocused {
+                                        Text("Privacy-First Messaging")
+                                            .font(.subheadline)
+                                            .foregroundStyle(.secondary)
+                                            .offset(y: showContent ? 0 : 15)
+                                            .opacity(showContent ? 1.0 : 0)
+                                            .transition(.opacity.combined(with: .scale))
                                     }
                                 }
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 56)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 16)
-                                        .fill(email.isEmpty ? Color.gray.gradient : Color.blue.gradient)
-                                )
-                                .foregroundStyle(.white)
-                                .shadow(color: email.isEmpty ? .clear : .blue.opacity(0.3), radius: 10, y: 5)
-                            }
-                            .disabled(email.isEmpty || viewModel.isLoading)
-
-                            if let error = viewModel.error {
-                                HStack(spacing: 8) {
-                                    Image(systemName: "exclamationmark.triangle.fill")
-                                    Text(error)
+                                
+                                // Feature pills - hide on keyboard
+                                if !isEmailFocused {
+                                    HStack(spacing: 8) {
+                                        FeaturePill(icon: "lock.fill", text: "E2E")
+                                        FeaturePill(icon: "eye.slash.fill", text: "Private")
+                                        FeaturePill(icon: "bolt.fill", text: "Fast")
+                                    }
+                                    .opacity(showContent ? 1.0 : 0)
+                                    .offset(y: showContent ? 0 : 15)
+                                    .transition(.opacity.combined(with: .scale))
                                 }
-                                .font(.callout)
-                                .foregroundStyle(.red)
-                                .padding()
-                                .background(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .fill(Color.red.opacity(0.1))
-                                )
+                                
+                                // Welcome character - hide on keyboard
+                                if !isEmailFocused {
+                                    WelcomeCharacter()
+                                        .scaleEffect(0.6)
+                                        .opacity(showContent ? 1.0 : 0)
+                                        .frame(height: 70)
+                                        .transition(.opacity.combined(with: .scale))
+                                }
                             }
-                        }
-                        .padding(.horizontal, 24)
+                            
+                            Spacer()
+                                .frame(minHeight: geometry.size.height * 0.03, maxHeight: geometry.size.height * 0.06)
 
-                        Spacer().frame(height: 60)
+                            // Middle section - Form
+                            VStack(spacing: 14) {
+                                // Sign in with Apple
+                                SignInWithAppleButton(
+                                    onRequest: { request in
+                                        request.requestedScopes = [.email, .fullName]
+                                    },
+                                    onCompletion: { result in
+                                        switch result {
+                                        case .success(let authorization):
+                                            // TODO: Handle Apple Sign In
+                                            print("Apple Sign In Success")
+                                        case .failure(let error):
+                                            print("Apple Sign In Error: \(error)")
+                                        }
+                                    }
+                                )
+                                .signInWithAppleButtonStyle(.black)
+                                .frame(height: 50)
+                                .cornerRadius(12)
+                                .shadow(color: .black.opacity(0.1), radius: 8, y: 3)
+                                .offset(y: showContent ? 0 : 15)
+                                .opacity(showContent ? 1.0 : 0)
+                                
+                                // Divider
+                                HStack(spacing: 12) {
+                                    Rectangle()
+                                        .fill(Color.gray.opacity(0.3))
+                                        .frame(height: 1)
+                                    
+                                    Text("or")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    
+                                    Rectangle()
+                                        .fill(Color.gray.opacity(0.3))
+                                        .frame(height: 1)
+                                }
+                                .padding(.vertical, 4)
+                                .opacity(showContent ? 1.0 : 0)
+                                
+                                // Email Input - compact
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text("EMAIL ADDRESS")
+                                        .font(.caption2.weight(.semibold))
+                                        .foregroundStyle(.secondary)
+                                        .tracking(0.8)
+                                        .padding(.leading, 2)
 
-                        // Footer
-                        Text("End-to-end encrypted messaging\nYour privacy is our priority")
-                            .font(.footnote)
+                                    HStack(spacing: 10) {
+                                        Image(systemName: "envelope.fill")
+                                            .font(.callout)
+                                            .foregroundStyle(isEmailFocused ? .blue : .secondary)
+                                            .frame(width: 18)
+                                            .animation(.spring(response: 0.3), value: isEmailFocused)
+                                        
+                                        TextField("your@email.com", text: $email)
+                                            .keyboardType(.emailAddress)
+                                            .autocapitalization(.none)
+                                            .textContentType(.emailAddress)
+                                            .submitLabel(.continue)
+                                            .focused($isEmailFocused)
+                                            .onSubmit {
+                                                if !email.isEmpty {
+                                                    Task { await viewModel.sendCode(email: email) }
+                                                }
+                                            }
+                                    }
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 12)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .fill(Color(.tertiarySystemBackground))
+                                    )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .strokeBorder(
+                                                isEmailFocused ?
+                                                    LinearGradient(colors: [.blue, .cyan], startPoint: .leading, endPoint: .trailing) :
+                                                    LinearGradient(colors: [Color.gray.opacity(0.2)], startPoint: .leading, endPoint: .trailing),
+                                                lineWidth: isEmailFocused ? 2 : 1
+                                            )
+                                            .animation(.spring(response: 0.3), value: isEmailFocused)
+                                    )
+                                    .shadow(color: isEmailFocused ? .blue.opacity(0.15) : .black.opacity(0.04), radius: isEmailFocused ? 10 : 5, y: 2)
+                                    .scaleEffect(isEmailFocused ? 1.01 : 1.0)
+                                    .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isEmailFocused)
+                                }
+                                .offset(y: showContent ? 0 : 15)
+                                .opacity(showContent ? 1.0 : 0)
+
+                                // Continue Button - compact
+                                ContinueButton(
+                                    isEmpty: email.isEmpty,
+                                    isLoading: viewModel.isLoading,
+                                    action: {
+                                        isEmailFocused = false
+                                        HapticManager.shared.medium()
+                                        Task { await viewModel.sendCode(email: email) }
+                                    }
+                                )
+                                .frame(height: 48)
+                                .offset(y: showContent ? 0 : 15)
+                                .opacity(showContent ? 1.0 : 0)
+
+                                if let error = viewModel.error {
+                                    AuthErrorBanner(message: error)
+                                        .transition(.move(edge: .top).combined(with: .opacity))
+                                }
+                            }
+                            .padding(.horizontal, 28)
+
+                            Spacer()
+                                .frame(minHeight: geometry.size.height * 0.02, maxHeight: geometry.size.height * 0.04)
+                            
+                            // Bottom section - Footer
+                            VStack(spacing: 6) {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "checkmark.shield.fill")
+                                        .font(.caption2)
+                                        .foregroundStyle(.green)
+                                    Text("End-to-end encrypted")
+                                        .font(.caption.weight(.medium))
+                                }
+                                
+                                HStack(spacing: 4) {
+                                    Image(systemName: "eye.slash.fill")
+                                        .font(.caption2)
+                                        .foregroundStyle(.blue)
+                                    Text("Your privacy is our priority")
+                                        .font(.caption.weight(.medium))
+                                }
+                            }
                             .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                            .padding(.bottom, 32)
+                            .opacity(showContent ? 1.0 : 0)
+                            
+                            Spacer()
+                                .frame(height: geometry.size.height * 0.03)
+                        }
                     }
+                    .scrollDismissesKeyboard(.interactively)
                 }
-                .scrollDismissesKeyboard(.interactively)
             }
             .navigationDestination(isPresented: $viewModel.showVerification) {
                 VerificationView(email: email, viewModel: viewModel)
             }
             .onAppear {
                 viewModel.appState = appState
-            }
-            .onTapGesture {
-                isEmailFocused = false
+                
+                // Staggered animations
+                withAnimation(.spring(response: 0.6, dampingFraction: 0.8)) {
+                    showContent = true
+                }
+                isLogoAnimating = true
             }
         }
     }
@@ -200,48 +273,83 @@ struct VerificationView: View {
     @FocusState private var isCodeFocused: Bool
     @FocusState private var isUsernameFocused: Bool
     @Environment(\.dismiss) private var dismiss
+    @State private var shakeCode = 0
+    @State private var showContent = false
+    @Namespace private var animation
 
     var body: some View {
-        ZStack {
-            LinearGradient(
-                colors: [Color(.systemBackground), Color.blue.opacity(0.1)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .ignoresSafeArea()
+        GeometryReader { geometry in
+            ZStack {
+                AnimatedGradientBackground()
 
-            ScrollView {
-                VStack(spacing: 32) {
-                    Spacer().frame(height: 40)
+                ScrollView {
+                    VStack(spacing: 32) {
+                        Spacer()
+                            .frame(height: isCodeFocused || isUsernameFocused ? 
+                                   geometry.size.height * 0.05 : 
+                                   geometry.size.height * 0.08)
+                            .animation(.spring(response: 0.4), value: isCodeFocused)
+                            .animation(.spring(response: 0.4), value: isUsernameFocused)
 
-                    // Icon
-                    ZStack {
-                        Circle()
-                            .fill(showUsernameInput ? Color.green.gradient : Color.blue.gradient)
-                            .frame(width: 90, height: 90)
-                            .shadow(color: (showUsernameInput ? Color.green : Color.blue).opacity(0.3), radius: 20, y: 10)
+                        // Animated Icon
+                        if !isCodeFocused && !isUsernameFocused {
+                            ZStack {
+                                // Pulsing background
+                                Circle()
+                                    .fill((showUsernameInput ? Color.green : Color.blue).opacity(0.2))
+                                    .frame(width: 110, height: 110)
+                                    .scaleEffect(showContent ? 1.1 : 0.9)
+                                    .opacity(showContent ? 0.5 : 0)
+                                    .animation(
+                                        .easeInOut(duration: 1.5).repeatForever(autoreverses: true),
+                                        value: showContent
+                                    )
+                                
+                                Circle()
+                                    .fill(
+                                        showUsernameInput ?
+                                            LinearGradient(colors: [.green, .mint], startPoint: .topLeading, endPoint: .bottomTrailing) :
+                                            LinearGradient(colors: [.blue, .cyan], startPoint: .topLeading, endPoint: .bottomTrailing)
+                                    )
+                                    .frame(width: 90, height: 90)
+                                    .shadow(color: (showUsernameInput ? Color.green : Color.blue).opacity(0.3), radius: 20, y: 10)
+                                    .scaleEffect(showContent ? 1.0 : 0.5)
 
-                        Image(systemName: showUsernameInput ? "person.badge.key.fill" : "envelope.badge.shield.half.filled")
-                            .font(.system(size: 45))
-                            .foregroundStyle(.white)
-                    }
+                                Image(systemName: showUsernameInput ? "person.badge.key.fill" : "envelope.badge.shield.half.filled")
+                                    .font(.system(size: 45))
+                                    .foregroundStyle(.white)
+                                    .rotationEffect(.degrees(showContent ? 0 : 180))
+                                    .scaleEffect(showContent ? 1.0 : 0.5)
+                            }
+                            .animation(.spring(response: 0.6, dampingFraction: 0.7), value: showUsernameInput)
+                            .animation(.spring(response: 0.6, dampingFraction: 0.7), value: showContent)
+                            .transition(.scale.combined(with: .opacity))
+                        }
 
-                    // Title
+                    // Title with transition
                     VStack(spacing: 12) {
                         Text(showUsernameInput ? "Choose Username" : "Check Your Email")
                             .font(.system(size: 32, weight: .bold, design: .rounded))
+                            .id(showUsernameInput ? "username" : "email")
+                            .transition(.asymmetric(
+                                insertion: .move(edge: .trailing).combined(with: .opacity),
+                                removal: .move(edge: .leading).combined(with: .opacity)
+                            ))
 
                         Text(showUsernameInput ? "Pick a unique username" : "Code sent to \(email)")
                             .font(.body)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
                             .padding(.horizontal)
+                            .id(showUsernameInput ? "username-sub" : "email-sub")
+                            .transition(.opacity)
                     }
+                    .opacity(showContent ? 1.0 : 0)
 
                     Spacer().frame(height: 32)
 
                     if !showUsernameInput {
-                        // Code Input
+                        // Code Input with shake animation
                         VStack(spacing: 24) {
                             VStack(spacing: 12) {
                                 Text("VERIFICATION CODE")
@@ -250,36 +358,55 @@ struct VerificationView: View {
                                     .tracking(1)
 
                                 TextField("000000", text: $code)
-                                    .textFieldStyle(.plain)
                                     .keyboardType(.numberPad)
                                     .multilineTextAlignment(.center)
                                     .font(.system(size: 40, weight: .bold, design: .rounded))
                                     .tracking(8)
-                                    .padding(.vertical, 20)
-                                    .padding(.horizontal)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 20)
-                                            .fill(Color(.systemBackground))
-                                            .shadow(color: .black.opacity(0.05), radius: 15, y: 8)
-                                    )
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 20)
-                                            .stroke(isCodeFocused ? Color.blue : Color.clear, lineWidth: 2)
-                                    )
-                                    .frame(maxWidth: 280)
                                     .focused($isCodeFocused)
                                     .onChange(of: code) { _, newValue in
+                                        // Limit to 6 digits
                                         if newValue.count > 6 {
                                             code = String(newValue.prefix(6))
                                         }
+                                        
+                                        // Auto-submit when 6 digits entered
                                         if newValue.count == 6 {
                                             isCodeFocused = false
-                                            showUsernameInput = true
+                                            HapticManager.shared.success()
+                                            
+                                            withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) {
+                                                showUsernameInput = true
+                                            }
                                         }
                                     }
+                                    .padding(.vertical, 24)
+                                    .frame(maxWidth: 280)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 20)
+                                            .fill(Color(.tertiarySystemBackground))
+                                    )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 20)
+                                            .strokeBorder(
+                                                isCodeFocused ?
+                                                    LinearGradient(colors: [.blue, .cyan], startPoint: .leading, endPoint: .trailing) :
+                                                    LinearGradient(colors: [Color.gray.opacity(0.2)], startPoint: .leading, endPoint: .trailing),
+                                                lineWidth: isCodeFocused ? 2 : 1
+                                            )
+                                            .animation(.spring(response: 0.3), value: isCodeFocused)
+                                    )
+                                    .shadow(color: isCodeFocused ? .blue.opacity(0.2) : .black.opacity(0.05), radius: isCodeFocused ? 15 : 8, y: 8)
+                                    .scaleEffect(isCodeFocused ? 1.02 : 1.0)
+                                    .shake(times: shakeCode)
+                                    .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isCodeFocused)
                             }
+                            .transition(.asymmetric(
+                                insertion: .move(edge: .leading).combined(with: .opacity),
+                                removal: .move(edge: .trailing).combined(with: .opacity)
+                            ))
 
                             Button {
+                                HapticManager.shared.light()
                                 Task { await viewModel.sendCode(email: email) }
                             } label: {
                                 HStack(spacing: 8) {
@@ -296,9 +423,12 @@ struct VerificationView: View {
                                 )
                             }
                             .disabled(viewModel.isLoading)
+                            .opacity(viewModel.isLoading ? 0.5 : 1.0)
+                            .transition(.opacity)
                         }
+                        .opacity(showContent ? 1.0 : 0)
                     } else {
-                        // Username Input
+                        // Username Input with focus animation
                         VStack(spacing: 24) {
                             VStack(alignment: .leading, spacing: 12) {
                                 Text("USERNAME")
@@ -310,10 +440,11 @@ struct VerificationView: View {
                                 HStack(spacing: 12) {
                                     Image(systemName: "at")
                                         .font(.title3)
-                                        .foregroundStyle(.secondary)
-
+                                        .foregroundStyle(isUsernameFocused ? .green : .secondary)
+                                        .frame(width: 24)
+                                        .animation(.spring(response: 0.3), value: isUsernameFocused)
+                                    
                                     TextField("username", text: $username)
-                                        .textFieldStyle(.plain)
                                         .autocapitalization(.none)
                                         .textContentType(.username)
                                         .submitLabel(.done)
@@ -333,91 +464,249 @@ struct VerificationView: View {
                                 .padding()
                                 .background(
                                     RoundedRectangle(cornerRadius: 16)
-                                        .fill(Color(.systemBackground))
-                                        .shadow(color: .black.opacity(0.05), radius: 10, y: 5)
+                                        .fill(Color(.tertiarySystemBackground))
                                 )
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 16)
-                                        .stroke(isUsernameFocused ? Color.green : Color.clear, lineWidth: 2)
+                                        .strokeBorder(
+                                            isUsernameFocused ?
+                                                LinearGradient(colors: [.green, .mint], startPoint: .leading, endPoint: .trailing) :
+                                                LinearGradient(colors: [Color.gray.opacity(0.2)], startPoint: .leading, endPoint: .trailing),
+                                            lineWidth: isUsernameFocused ? 2 : 1
+                                        )
+                                        .animation(.spring(response: 0.3), value: isUsernameFocused)
                                 )
+                                .shadow(color: isUsernameFocused ? .green.opacity(0.2) : .black.opacity(0.05), radius: isUsernameFocused ? 15 : 8, y: 4)
+                                .scaleEffect(isUsernameFocused ? 1.02 : 1.0)
+                                .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isUsernameFocused)
                             }
                             .frame(maxWidth: 320)
+                            .transition(.asymmetric(
+                                insertion: .move(edge: .trailing).combined(with: .opacity),
+                                removal: .move(edge: .leading).combined(with: .opacity)
+                            ))
 
-                            Button {
-                                isUsernameFocused = false
-                                Task {
-                                    await viewModel.verify(
-                                        email: email,
-                                        code: code,
-                                        username: username.isEmpty ? nil : username
-                                    )
-                                }
-                            } label: {
-                                HStack {
-                                    Text(viewModel.isLoading ? "Verifying..." : "Complete Setup")
-                                        .font(.headline)
-
-                                    if !viewModel.isLoading {
-                                        Image(systemName: "checkmark")
-                                            .font(.headline)
+                            CompleteSetupButton(
+                                isEmpty: username.isEmpty,
+                                isLoading: viewModel.isLoading,
+                                action: {
+                                    isUsernameFocused = false
+                                    HapticManager.shared.medium()
+                                    Task {
+                                        await viewModel.verify(
+                                            email: email,
+                                            code: code,
+                                            username: username.isEmpty ? nil : username
+                                        )
                                     }
                                 }
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 56)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 16)
-                                        .fill(username.isEmpty ? Color.gray.gradient : Color.green.gradient)
-                                )
-                                .foregroundStyle(.white)
-                                .shadow(color: username.isEmpty ? .clear : .green.opacity(0.3), radius: 10, y: 5)
-                            }
-                            .disabled(username.isEmpty || viewModel.isLoading)
+                            )
                             .padding(.horizontal, 24)
+                            .transition(.opacity)
                         }
                     }
 
                     if let error = viewModel.error {
-                        HStack(spacing: 8) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                            Text(error)
-                        }
-                        .font(.callout)
-                        .foregroundStyle(.red)
-                        .padding()
-                        .background(
-                            RoundedRectangle(cornerRadius: 12)
-                                .fill(Color.red.opacity(0.1))
-                        )
-                        .padding(.horizontal, 24)
+                        AuthErrorBanner(message: error)
+                            .padding(.horizontal, 24)
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                            .onAppear {
+                                HapticManager.shared.error()
+                            }
                     }
 
-                    Spacer().frame(height: 100)
-                }
-            }
-            .scrollDismissesKeyboard(.interactively)
-        }
-        .onAppear {
-            isCodeFocused = true
-        }
-        .navigationTitle("Verification")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .keyboard) {
-                HStack {
-                    Spacer()
-                    Button("Done") {
-                        isCodeFocused = false
-                        isUsernameFocused = false
+                        Spacer()
+                            .frame(height: isCodeFocused || isUsernameFocused ? 
+                                   geometry.size.height * 0.02 : 
+                                   geometry.size.height * 0.05)
+                            .animation(.spring(response: 0.4), value: isCodeFocused)
+                            .animation(.spring(response: 0.4), value: isUsernameFocused)
                     }
-                    .font(.headline)
-                    .foregroundStyle(.blue)
+                    .scrollDismissesKeyboard(.interactively)
                 }
             }
+            .animation(.spring(response: 0.5, dampingFraction: 0.8), value: showUsernameInput)
+            .onAppear {
+                withAnimation(.spring(response: 0.6, dampingFraction: 0.8).delay(0.1)) {
+                    showContent = true
+                }
+                
+                // Auto-focus code input
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    isCodeFocused = true
+                }
+            }
+            .navigationTitle("Verification")
+            .navigationBarTitleDisplayMode(.inline)
         }
-        .onTapGesture {
-            isCodeFocused = false
-            isUsernameFocused = false
+    }
+}
+
+// MARK: - Helper Views
+
+// Feature Pill - Like badges in instructions.md
+struct FeaturePill: View {
+    let icon: String
+    let text: String
+    
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.caption2)
+            Text(text)
+                .font(.caption2.weight(.semibold))
         }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(
+            Capsule()
+                .fill(Color.blue.opacity(0.15))
+        )
+        .foregroundStyle(.blue)
+    }
+}
+
+// Animated Gradient Background
+struct AnimatedGradientBackground: View {
+    @State private var animateGradient = false
+    
+    var body: some View {
+        LinearGradient(
+            colors: [
+                Color(.systemBackground),
+                Color.blue.opacity(animateGradient ? 0.15 : 0.05),
+                Color.cyan.opacity(animateGradient ? 0.1 : 0.05)
+            ],
+            startPoint: animateGradient ? .topLeading : .bottomLeading,
+            endPoint: animateGradient ? .bottomTrailing : .topTrailing
+        )
+        .ignoresSafeArea()
+        .onAppear {
+            withAnimation(.easeInOut(duration: 3.0).repeatForever(autoreverses: true)) {
+                animateGradient = true
+            }
+        }
+    }
+}
+
+// Error Banner with animation
+struct AuthErrorBanner: View {
+    let message: String
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.title3)
+            Text(message)
+                .font(.callout)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .foregroundStyle(.red)
+        .padding()
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color.red.opacity(0.1))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .strokeBorder(Color.red.opacity(0.3), lineWidth: 1)
+                )
+        )
+    }
+}
+
+struct ContinueButton: View {
+    let isEmpty: Bool
+    let isLoading: Bool
+    let action: () -> Void
+    
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                if isLoading {
+                    ProgressView()
+                        .tint(.white)
+                    Text("Sending...")
+                } else {
+                    Text("Continue")
+                    Image(systemName: "arrow.right")
+                }
+            }
+            .font(.headline)
+            .frame(maxWidth: .infinity)
+            .frame(height: 56)
+            .background {
+                if isEmpty || isLoading {
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(Color.gray.opacity(0.3))
+                } else {
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(LinearGradient(
+                            colors: [.blue, .blue.opacity(0.8)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ))
+                }
+            }
+            .foregroundStyle(.white)
+            .shadow(color: isEmpty ? .clear : .blue.opacity(0.3), radius: 12, y: 6)
+            .scaleEffect(isEmpty || isLoading ? 1.0 : 1.0)
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isEmpty)
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isLoading)
+        }
+        .disabled(isEmpty || isLoading)
+        .buttonStyle(BounceButtonStyle())
+    }
+}
+
+struct CompleteSetupButton: View {
+    let isEmpty: Bool
+    let isLoading: Bool
+    let action: () -> Void
+    
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                if isLoading {
+                    ProgressView()
+                        .tint(.white)
+                    Text("Verifying...")
+                } else {
+                    Text("Complete Setup")
+                    Image(systemName: "checkmark")
+                }
+            }
+            .font(.headline)
+            .frame(maxWidth: .infinity)
+            .frame(height: 56)
+            .background {
+                if isEmpty || isLoading {
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(Color.gray.opacity(0.3))
+                } else {
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(LinearGradient(
+                            colors: [.green, .green.opacity(0.8)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ))
+                }
+            }
+            .foregroundStyle(.white)
+            .shadow(color: isEmpty ? .clear : .green.opacity(0.3), radius: 12, y: 6)
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isEmpty)
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isLoading)
+        }
+        .disabled(isEmpty || isLoading)
+        .buttonStyle(BounceButtonStyle())
+    }
+}
+
+// Bounce Button Style for better interaction
+struct BounceButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.95 : 1.0)
+            .animation(.spring(response: 0.3, dampingFraction: 0.6), value: configuration.isPressed)
     }
 }
 

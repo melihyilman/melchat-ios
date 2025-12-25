@@ -6,7 +6,7 @@ class APIClient {
 
     // Simulator için localhost çalışır, gerçek cihaz için Mac'in IP'sini kullan
     #if targetEnvironment(simulator)
-    private let baseURL = "http://localhost:3000/api"
+    private let baseURL = "http://192.168.1.116:3000/api"
     #else
     private let baseURL = "http://192.168.1.116:3000/api" // TODO: Mac'in gerçek IP'sini buraya yaz
     #endif
@@ -73,6 +73,14 @@ class APIClient {
         let endpoint = "\(baseURL)/keys/me"
         return try await getWithAuth(endpoint: endpoint, token: token)
     }
+    
+    // MARK: - User Search
+    
+    func searchUsers(token: String, query: String) async throws -> SearchUsersResponse {
+        let encodedQuery = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
+        let endpoint = "\(baseURL)/users/search?q=\(encodedQuery)"
+        return try await getWithAuth(endpoint: endpoint, token: token)
+    }
 
     func replenishPrekeys(token: String, prekeys: [String]) async throws {
         let endpoint = "\(baseURL)/keys/replenish"
@@ -106,13 +114,112 @@ class APIClient {
 
     func pollMessages(token: String) async throws -> PollMessagesResponse {
         let endpoint = "\(baseURL)/messages/poll"
-        return try await getWithAuth(endpoint: endpoint, token: token)
+        
+        // Debug: Log raw response
+        guard let url = URL(string: endpoint) else {
+            throw APIError.invalidURL
+        }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        
+        let (data, response) = try await session.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw APIError.invalidResponse
+        }
+        
+        // Log the actual response
+        if let jsonString = String(data: data, encoding: .utf8) {
+            NetworkLogger.shared.log("📦 [POLL] Raw response: \(jsonString)", group: "Polling")
+        }
+        
+        guard (200...299).contains(httpResponse.statusCode) else {
+            throw APIError.httpError(httpResponse.statusCode)
+        }
+        
+        // Decode standard format: { success: true, messages: [...] }
+        let decoder = JSONDecoder()
+        do {
+            let response = try decoder.decode(PollMessagesResponse.self, from: data)
+            NetworkLogger.shared.log("✅ [POLL] Successfully decoded: \(response.messages.count) messages", group: "Polling")
+            return response
+        } catch {
+            NetworkLogger.shared.log("❌ [POLL] Decode error: \(error)", group: "Polling")
+            // Return empty response as fallback
+            return PollMessagesResponse(success: true, messages: [])
+        }
     }
 
     func sendAck(token: String, messageId: String, status: String) async throws {
         let endpoint = "\(baseURL)/messages/ack"
         let body = SendAckRequest(messageId: messageId, status: status)
         let _: AckResponse = try await postWithAuth(endpoint: endpoint, body: body, token: token)
+    }
+    
+    // MARK: - Media Endpoints
+    
+    func uploadMedia(token: String, mediaData: Data, mediaType: String, recipientId: String) async throws -> UploadMediaResponse {
+        let endpoint = "\(baseURL)/media/upload"
+        
+        guard let url = URL(string: endpoint) else {
+            NetworkLogger.shared.log("❌ Invalid URL: \(endpoint)")
+            throw APIError.invalidURL
+        }
+        
+        // Create multipart form data request
+        let boundary = UUID().uuidString
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        
+        // Build multipart body
+        var body = Data()
+        
+        // Add media file
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"media\"; filename=\"image.jpg\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: \(mediaType)\r\n\r\n".data(using: .utf8)!)
+        body.append(mediaData)
+        body.append("\r\n".data(using: .utf8)!)
+        
+        // Add recipient ID
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"recipientId\"\r\n\r\n".data(using: .utf8)!)
+        body.append(recipientId.data(using: .utf8)!)
+        body.append("\r\n".data(using: .utf8)!)
+        
+        // Close boundary
+        body.append("--\(boundary)--\r\n".data(using: .utf8)!)
+        
+        request.httpBody = body
+        
+        NetworkLogger.shared.log("📤 POST \(endpoint) (media upload, \(mediaData.count) bytes)")
+        
+        let (data, response) = try await URLSession.shared.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            NetworkLogger.shared.log("❌ Invalid response")
+            throw APIError.invalidResponse
+        }
+        
+        NetworkLogger.shared.log("📥 Response: \(httpResponse.statusCode)")
+        
+        guard (200...299).contains(httpResponse.statusCode) else {
+            let errorBody = String(data: data, encoding: .utf8) ?? "Unknown error"
+            NetworkLogger.shared.log("❌ Error: \(errorBody)")
+            throw APIError.httpError(httpResponse.statusCode)
+        }
+        
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let result = try decoder.decode(UploadMediaResponse.self, from: data)
+        
+        NetworkLogger.shared.log("✅ Media uploaded: \(result.mediaURL)")
+        return result
     }
 
     // MARK: - Generic Requests
@@ -253,7 +360,12 @@ struct UploadKeysRequest: Codable {
 
 struct SendMessageRequest: Codable {
     let toUserId: String
-    let encryptedPayload: String
+    let encryptedPayload: String  // Signal Protocol encrypted base64
+    
+    init(toUserId: String, encryptedPayload: String) {
+        self.toUserId = toUserId
+        self.encryptedPayload = encryptedPayload
+    }
 }
 
 struct SendAckRequest: Codable {
@@ -292,6 +404,24 @@ struct SendMessageResponse: Codable {
     let status: String
 }
 
+struct UploadMediaResponse: Codable {
+    let success: Bool
+    let mediaURL: String
+    let mediaId: String
+}
+
+struct UserSearchResult: Codable, Identifiable {
+    let id: String
+    let username: String
+    let displayName: String?
+    let isOnline: Bool
+}
+
+struct SearchUsersResponse: Codable {
+    let success: Bool?  // Optional because backend doesn't always return it
+    let users: [UserSearchResult]
+}
+
 struct ChatInfo: Codable, Identifiable {
     let userId: String
     let username: String
@@ -314,9 +444,18 @@ struct MessageMetadata: Codable {
     let id: String
     let fromUserId: String
     let toUserId: String
+    let encryptedContent: String
     let status: String
     let queuedAt: String
     let contentType: String
+    let mediaURL: String?
+    
+    // Computed properties for convenience
+    var senderId: String { fromUserId }
+    var recipientId: String { toUserId }
+    var timestamp: Date {
+        ISO8601DateFormatter().date(from: queuedAt) ?? Date()
+    }
 }
 
 struct GetChatMessagesResponse: Codable {
@@ -328,8 +467,13 @@ struct OfflineMessage: Codable {
     let id: String
     let from: String
     let to: String
-    let payload: String
+    let encryptedPayload: String
     let timestamp: String
+    
+    // Computed property for easy access (backward compatibility with code that uses 'payload')
+    var payload: String {
+        return encryptedPayload
+    }
 }
 
 struct PollMessagesResponse: Codable {

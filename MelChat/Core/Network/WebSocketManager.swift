@@ -20,11 +20,11 @@ class WebSocketManager: ObservableObject {
     func connect(userId: String) {
         self.userId = userId
         
-        // Simulator için localhost, gerçek cihaz için Mac IP
+        // Enable WebSocket connection
         #if targetEnvironment(simulator)
-        let wsURL = "ws://localhost:3000/ws/messaging"
+        let wsURL = "ws://192.168.1.116:3000/ws/messaging"  // Mac's IP
         #else
-        let wsURL = "ws://192.168.1.100:3000/ws/messaging" // TODO: Mac'in gerçek IP'sini buraya yaz
+        let wsURL = "ws://192.168.1.116:3000/ws/messaging"  // Mac's IP
         #endif
         
         guard let url = URL(string: wsURL) else {

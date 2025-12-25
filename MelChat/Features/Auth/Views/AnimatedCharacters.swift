@@ -1,0 +1,448 @@
+import SwiftUI
+
+// MARK: - Animated Characters & Empty States
+
+/// Animated Pikachu-style character for welcome screens
+struct WelcomeCharacter: View {
+    @State private var isWaving = false
+    @State private var isJumping = false
+    @State private var showSparkles = false
+    
+    var body: some View {
+        ZStack {
+            // Sparkles around character
+            if showSparkles {
+                ForEach(0..<6, id: \.self) { index in
+                    SparkleView()
+                        .offset(
+                            x: cos(Double(index) * .pi / 3) * 60,
+                            y: sin(Double(index) * .pi / 3) * 60
+                        )
+                        .opacity(showSparkles ? 1 : 0)
+                        .scaleEffect(showSparkles ? 1 : 0)
+                        .animation(
+                            .easeOut(duration: 0.5).delay(Double(index) * 0.1),
+                            value: showSparkles
+                        )
+                }
+            }
+            
+            VStack(spacing: 8) {
+                // Character head
+                ZStack {
+                    // Face
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [.yellow, .orange.opacity(0.8)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 80, height: 80)
+                        .shadow(color: .yellow.opacity(0.5), radius: 10)
+                    
+                    // Eyes
+                    HStack(spacing: 20) {
+                        Circle()
+                            .fill(.black)
+                            .frame(width: 8, height: 8)
+                        Circle()
+                            .fill(.black)
+                            .frame(width: 8, height: 8)
+                    }
+                    .offset(y: -5)
+                    
+                    // Smile
+                    Arc(startAngle: .degrees(10), endAngle: .degrees(170))
+                        .stroke(.black, lineWidth: 2)
+                        .frame(width: 30, height: 20)
+                        .offset(y: 10)
+                    
+                    // Cheeks (blush)
+                    HStack(spacing: 50) {
+                        Circle()
+                            .fill(.pink.opacity(0.6))
+                            .frame(width: 12, height: 12)
+                        Circle()
+                            .fill(.pink.opacity(0.6))
+                            .frame(width: 12, height: 12)
+                    }
+                }
+                .offset(y: isJumping ? -10 : 0)
+                .animation(
+                    .easeInOut(duration: 0.5).repeatForever(autoreverses: true),
+                    value: isJumping
+                )
+                
+                // Waving hand
+                Text("👋")
+                    .font(.system(size: 40))
+                    .rotationEffect(.degrees(isWaving ? 20 : -20))
+                    .animation(
+                        .easeInOut(duration: 0.5).repeatForever(autoreverses: true),
+                        value: isWaving
+                    )
+            }
+        }
+        .onAppear {
+            withAnimation {
+                isWaving = true
+                isJumping = true
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                withAnimation {
+                    showSparkles = true
+                }
+            }
+        }
+    }
+}
+
+/// Empty chat list state
+struct EmptyChatState: View {
+    @State private var isAnimating = false
+    var onNewChatTap: () -> Void = {}
+    
+    var body: some View {
+        VStack(spacing: 30) {
+            // Animated message bubble character
+            ZStack {
+                // Background glow
+                Circle()
+                    .fill(
+                        RadialGradient(
+                            colors: [.blue.opacity(0.2), .clear],
+                            center: .center,
+                            startRadius: 0,
+                            endRadius: 100
+                        )
+                    )
+                    .frame(width: 200, height: 200)
+                    .scaleEffect(isAnimating ? 1.2 : 0.8)
+                    .opacity(isAnimating ? 0.5 : 0.8)
+                    .animation(
+                        .easeInOut(duration: 2.0).repeatForever(autoreverses: true),
+                        value: isAnimating
+                    )
+                
+                // Message bubble character
+                VStack(spacing: 16) {
+                    // Main bubble
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 25)
+                            .fill(
+                                LinearGradient(
+                                    colors: [.blue, .cyan],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 120, height: 80)
+                            .shadow(color: .blue.opacity(0.3), radius: 15)
+                        
+                        // Dots (thinking animation)
+                        HStack(spacing: 8) {
+                            ForEach(0..<3) { index in
+                                Circle()
+                                    .fill(.white)
+                                    .frame(width: 12, height: 12)
+                                    .opacity(isAnimating ? 1 : 0.3)
+                                    .animation(
+                                        .easeInOut(duration: 0.6)
+                                            .repeatForever(autoreverses: true)
+                                            .delay(Double(index) * 0.2),
+                                        value: isAnimating
+                                    )
+                            }
+                        }
+                    }
+                    
+                    // Tail
+                    Triangle()
+                        .fill(.cyan)
+                        .frame(width: 20, height: 15)
+                        .offset(x: -40, y: -8)
+                }
+                .offset(y: isAnimating ? -5 : 5)
+                .animation(
+                    .easeInOut(duration: 1.5).repeatForever(autoreverses: true),
+                    value: isAnimating
+                )
+            }
+            
+            // Text
+            VStack(spacing: 12) {
+                Text("No Chats Yet")
+                    .font(.title2.bold())
+                
+                Text("Start a conversation by searching\nfor users and sending a message!")
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            
+            // Action button
+            Button {
+                HapticManager.shared.light()
+                onNewChatTap()
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "plus.bubble.fill")
+                    Text("New Chat")
+                }
+                .font(.headline)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 24)
+                .padding(.vertical, 14)
+                .background(
+                    LinearGradient(
+                        colors: [.blue, .cyan],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                )
+                .clipShape(Capsule())
+                .shadow(color: .blue.opacity(0.3), radius: 10, y: 5)
+                .scaleEffect(1.0)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 40)
+        .onAppear {
+            isAnimating = true
+        }
+    }
+}
+
+/// Empty messages state (inside a chat)
+struct EmptyMessagesState: View {
+    let userName: String
+    @State private var isAnimating = false
+    
+    var body: some View {
+        VStack(spacing: 24) {
+            // Lock shield animation
+            ZStack {
+                // Pulsing shield
+                Image(systemName: "shield.fill")
+                    .font(.system(size: 80))
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [.green, .mint],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .shadow(color: .green.opacity(0.3), radius: 20)
+                
+                // Lock overlay
+                Image(systemName: "lock.fill")
+                    .font(.system(size: 35))
+                    .foregroundStyle(.white)
+                    .offset(y: 5)
+                
+                // Sparkle effect
+                Circle()
+                    .stroke(lineWidth: 2)
+                    .fill(.green.opacity(0.3))
+                    .frame(width: 120, height: 120)
+                    .scaleEffect(isAnimating ? 1.3 : 1.0)
+                    .opacity(isAnimating ? 0 : 1)
+                    .animation(
+                        .easeOut(duration: 1.5).repeatForever(autoreverses: false),
+                        value: isAnimating
+                    )
+            }
+            .scaleEffect(isAnimating ? 1.05 : 0.95)
+            .animation(
+                .easeInOut(duration: 2.0).repeatForever(autoreverses: true),
+                value: isAnimating
+            )
+            
+            VStack(spacing: 12) {
+                Text("Secure Chat with \(userName)")
+                    .font(.title3.bold())
+                
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark.seal.fill")
+                        .foregroundStyle(.green)
+                    Text("End-to-end encrypted")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                
+                Text("Your messages are private and secure.\nOnly you and \(userName) can read them.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.top, 4)
+            }
+        }
+        .padding(.horizontal, 40)
+        .onAppear {
+            isAnimating = true
+        }
+    }
+}
+
+/// Confetti animation for successful actions
+struct ConfettiView: View {
+    @State private var isAnimating = false
+    
+    var body: some View {
+        ZStack {
+            ForEach(0..<30, id: \.self) { index in
+                ConfettiPiece()
+                    .offset(
+                        x: CGFloat.random(in: -150...150),
+                        y: isAnimating ? 600 : -50
+                    )
+                    .rotationEffect(.degrees(isAnimating ? 360 : 0))
+                    .opacity(isAnimating ? 0 : 1)
+                    .animation(
+                        .easeIn(duration: Double.random(in: 1.0...2.0))
+                            .delay(Double(index) * 0.02),
+                        value: isAnimating
+                    )
+            }
+        }
+        .onAppear {
+            isAnimating = true
+        }
+    }
+}
+
+// MARK: - Helper Shapes
+
+struct SparkleView: View {
+    var body: some View {
+        Image(systemName: "sparkle")
+            .font(.title2)
+            .foregroundStyle(
+                LinearGradient(
+                    colors: [.yellow, .orange],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+    }
+}
+
+struct Arc: Shape {
+    let startAngle: Angle
+    let endAngle: Angle
+    
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.addArc(
+            center: CGPoint(x: rect.midX, y: rect.midY),
+            radius: rect.width / 2,
+            startAngle: startAngle,
+            endAngle: endAngle,
+            clockwise: false
+        )
+        return path
+    }
+}
+
+struct Triangle: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.midX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        path.closeSubpath()
+        return path
+    }
+}
+
+struct ConfettiPiece: View {
+    let colors: [Color] = [.red, .blue, .green, .yellow, .purple, .orange, .pink]
+    let randomColor: Color
+    let randomSize: CGFloat
+    
+    init() {
+        randomColor = colors.randomElement() ?? .blue
+        randomSize = CGFloat.random(in: 8...15)
+    }
+    
+    var body: some View {
+        RoundedRectangle(cornerRadius: 3)
+            .fill(randomColor)
+            .frame(width: randomSize, height: randomSize)
+    }
+}
+
+// MARK: - Loading State Character
+
+struct LoadingCharacter: View {
+    @State private var isAnimating = false
+    
+    var body: some View {
+        VStack(spacing: 16) {
+            // Spinning message icon
+            ZStack {
+                Circle()
+                    .stroke(lineWidth: 3)
+                    .fill(.blue.opacity(0.2))
+                    .frame(width: 60, height: 60)
+                
+                Circle()
+                    .trim(from: 0, to: 0.7)
+                    .stroke(
+                        LinearGradient(
+                            colors: [.blue, .cyan],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        ),
+                        style: StrokeStyle(lineWidth: 3, lineCap: .round)
+                    )
+                    .frame(width: 60, height: 60)
+                    .rotationEffect(.degrees(isAnimating ? 360 : 0))
+                    .animation(
+                        .linear(duration: 1.0).repeatForever(autoreverses: false),
+                        value: isAnimating
+                    )
+                
+                Image(systemName: "message.fill")
+                    .font(.title2)
+                    .foregroundStyle(.blue)
+            }
+            
+            Text("Loading...")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .onAppear {
+            isAnimating = true
+        }
+    }
+}
+
+// MARK: - Success Animation
+
+struct SimpleSuccessCheckmark: View {
+    @State private var isAnimating = false
+    
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(.green)
+                .frame(width: 80, height: 80)
+                .scaleEffect(isAnimating ? 1.0 : 0.5)
+                .opacity(isAnimating ? 1.0 : 0)
+            
+            Image(systemName: "checkmark")
+                .font(.system(size: 40, weight: .bold))
+                .foregroundStyle(.white)
+                .scaleEffect(isAnimating ? 1.0 : 0.3)
+                .opacity(isAnimating ? 1.0 : 0)
+        }
+        .onAppear {
+            withAnimation(.spring(response: 0.6, dampingFraction: 0.6)) {
+                isAnimating = true
+            }
+        }
+    }
+}
