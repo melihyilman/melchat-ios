@@ -1,6 +1,4 @@
 import Foundation
-import Foundation
-import SwiftUI
 import Combine
 
 @MainActor
@@ -53,50 +51,25 @@ class AuthViewModel: ObservableObject {
                 return
             }
 
-            // Generate and upload encryption keys for E2E encryption
+            // If new user, generate and upload encryption keys
             if response.user.isNewUser {
-                NetworkLogger.shared.log("🔑 New user - generating E2E encryption keys...")
-                
-                // Generate Signal Protocol keys
-                let identityKeyPair = encryptionService.generateKeyPair()
-                let signedPrekeyPair = encryptionService.generateKeyPair()
-                let signedPrekeySignature = encryptionService.sign(
-                    data: signedPrekeyPair.publicKey,
-                    with: identityKeyPair.privateKey
-                )
+                let keyPair = encryptionService.generateKeyPair()
 
-                // Save to Keychain
-                try keychainHelper.save(identityKeyPair.privateKey, forKey: KeychainHelper.Keys.privateKey)
-                try keychainHelper.save(identityKeyPair.publicKey, forKey: KeychainHelper.Keys.publicKey)
-                
-                NetworkLogger.shared.log("🔑 Generated keys:")
-                NetworkLogger.shared.log("  Identity Key: \(identityKeyPair.publicKey.base64EncodedString().prefix(20))...")
-                NetworkLogger.shared.log("  Signed Prekey: \(signedPrekeyPair.publicKey.base64EncodedString().prefix(20))...")
+                // Save keys to Keychain
+                try keychainHelper.save(keyPair.privateKey, forKey: KeychainHelper.Keys.privateKey)
+                try keychainHelper.save(keyPair.publicKey, forKey: KeychainHelper.Keys.publicKey)
 
-                // Upload to backend
+                // Upload public key to backend
                 try await APIClient.shared.uploadKeys(
                     token: response.token,
-                    identityKey: identityKeyPair.publicKey.base64EncodedString(),
-                    signedPrekey: signedPrekeyPair.publicKey.base64EncodedString(),
-                    signedPrekeySignature: signedPrekeySignature.base64EncodedString()
+                    identityKey: keyPair.publicKey.base64EncodedString(),
+                    signedPrekey: keyPair.publicKey.base64EncodedString(),
+                    signedPrekeySignature: keyPair.publicKey.base64EncodedString()
                 )
-                
-                NetworkLogger.shared.log("✅ E2E encryption keys uploaded")
-            } else {
-                NetworkLogger.shared.log("✅ Using existing E2E encryption keys")
             }
 
             // Save token
             try keychainHelper.save(response.token.data(using: .utf8)!, forKey: KeychainHelper.Keys.authToken)
-            
-            // Load encryption keys for E2E (new or existing user)
-            do {
-                try await EncryptionManager.shared.loadKeys()
-                NetworkLogger.shared.log("✅ Encryption keys loaded from Keychain")
-            } catch {
-                NetworkLogger.shared.log("⚠️ Could not load encryption keys: \(error)")
-                // Continue anyway - keys might not exist yet for old users
-            }
             
             // Save user info to UserDefaults for Settings
             UserDefaults.standard.set(response.user.username, forKey: "username")

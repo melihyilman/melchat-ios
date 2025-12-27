@@ -153,8 +153,6 @@ final class Chat {
     @Attribute(.unique) var id: UUID
     var typeRaw: String
     var otherUserId: UUID?
-    var otherUserName: String?
-    var otherUserDisplayName: String?
     var groupId: UUID?
     var lastMessageText: String?
     var lastMessageAt: Date?
@@ -169,10 +167,8 @@ final class Chat {
 
     init(
         id: UUID = UUID(),
-        type: ChatType = .oneToOne,
+        type: ChatType,
         otherUserId: UUID? = nil,
-        otherUserName: String? = nil,
-        otherUserDisplayName: String? = nil,
         groupId: UUID? = nil,
         unreadCount: Int = 0,
         isPinned: Bool = false,
@@ -181,8 +177,6 @@ final class Chat {
         self.id = id
         self.typeRaw = type.rawValue
         self.otherUserId = otherUserId
-        self.otherUserName = otherUserName
-        self.otherUserDisplayName = otherUserDisplayName
         self.groupId = groupId
         self.unreadCount = unreadCount
         self.isPinned = isPinned

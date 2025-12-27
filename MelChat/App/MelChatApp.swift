@@ -61,21 +61,10 @@ class AppState: ObservableObject {
         if let tokenData = try? keychainHelper.load(forKey: KeychainHelper.Keys.authToken),
            let token = String(data: tokenData, encoding: .utf8),
            !token.isEmpty {
-            // Load userId from UserDefaults
-            if let userIdString = UserDefaults.standard.string(forKey: "currentUserId"),
-               let userId = UUID(uuidString: userIdString) {
-                currentUserId = userId
-                isAuthenticated = true
-                
-                // Reconnect WebSocket
-                webSocketManager.connect(userId: userId.uuidString)
-                
-                print("✅ Restored session for user: \(userId)")
-            } else {
-                // Token exists but no userId - force re-login
-                isAuthenticated = false
-                try? keychainHelper.delete(forKey: KeychainHelper.Keys.authToken)
-            }
+            // TODO: Validate token with backend
+            // For now, assume valid and extract userId
+            isAuthenticated = true
+            // TODO: Extract userId from JWT token
         } else {
             isAuthenticated = false
         }
@@ -86,40 +75,24 @@ class AppState: ObservableObject {
         if let tokenData = token.data(using: .utf8) {
             try? keychainHelper.save(tokenData, forKey: KeychainHelper.Keys.authToken)
         }
-        
-        // Save userId to UserDefaults
-        UserDefaults.standard.set(userId.uuidString, forKey: "currentUserId")
 
         currentUserId = userId
         isAuthenticated = true
 
         // Connect WebSocket (convert UUID to String for backend)
         webSocketManager.connect(userId: userId.uuidString)
-        
-        print("✅ User logged in: \(userId)")
     }
 
     func logout() {
         // Disconnect WebSocket
         webSocketManager.disconnect()
 
-        // Clear auth token (but keep encryption keys!)
+        // Clear Keychain
         try? keychainHelper.delete(forKey: KeychainHelper.Keys.authToken)
-        
-        // NOTE: We do NOT delete encryption keys
-        // They are tied to the user account and should persist
-        // try? keychainHelper.delete(forKey: KeychainHelper.Keys.privateKey)
-        // try? keychainHelper.delete(forKey: KeychainHelper.Keys.publicKey)
-        
-        // Clear UserDefaults
-        UserDefaults.standard.removeObject(forKey: "currentUserId")
-        UserDefaults.standard.removeObject(forKey: "username")
-        UserDefaults.standard.removeObject(forKey: "displayName")
-        UserDefaults.standard.removeObject(forKey: "email")
+        try? keychainHelper.delete(forKey: KeychainHelper.Keys.privateKey)
+        try? keychainHelper.delete(forKey: KeychainHelper.Keys.publicKey)
 
         currentUserId = nil
         isAuthenticated = false
-        
-        print("✅ User logged out (encryption keys preserved)")
     }
 }

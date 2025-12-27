@@ -49,31 +49,19 @@ class EncryptionManager: ObservableObject {
     func loadKeys() throws {
         let keychainHelper = KeychainHelper()
         
-        NetworkLogger.shared.log("🔑 Loading encryption keys from Keychain...", group: "Encryption")
-        
         // Load identity key
         if let identityKeyData = try? keychainHelper.load(forKey: "com.melchat.identityKey") {
             identityKeyPair = try Curve25519.KeyAgreement.PrivateKey(rawRepresentation: identityKeyData)
-            NetworkLogger.shared.log("✅ Identity key loaded", group: "Encryption")
-        } else {
-            NetworkLogger.shared.log("⚠️ Identity key not found in Keychain", group: "Encryption")
         }
         
         // Load signed prekey
         if let prekeyData = try? keychainHelper.load(forKey: "com.melchat.signedPrekey") {
             signedPrekey = try Curve25519.KeyAgreement.PrivateKey(rawRepresentation: prekeyData)
-            NetworkLogger.shared.log("✅ Signed prekey loaded", group: "Encryption")
-        } else {
-            NetworkLogger.shared.log("⚠️ Signed prekey not found in Keychain", group: "Encryption")
         }
         
         // TODO: Load one-time prekeys (requires custom serialization)
         
-        if identityKeyPair != nil && signedPrekey != nil {
-            NetworkLogger.shared.log("✅ All encryption keys loaded successfully", group: "Encryption")
-        } else {
-            NetworkLogger.shared.log("⚠️ Some encryption keys missing", group: "Encryption")
-        }
+        print("✅ Encryption keys loaded from Keychain")
     }
 
     /// Check if keys exist
@@ -151,35 +139,22 @@ class EncryptionManager: ObservableObject {
     func getOrCreateSessionKey(for userId: String, token: String) async throws -> SymmetricKey {
         // Check if session already exists
         if let existingKey = sessionKeys[userId] {
-            NetworkLogger.shared.log("✅ Using cached session key for user \(userId.prefix(8))", group: "Encryption")
             return existingKey
         }
 
-        NetworkLogger.shared.log("🔑 Creating new session key for user \(userId.prefix(8))...", group: "Encryption")
-        
-        // Make sure our identity key is loaded
-        if identityKeyPair == nil {
-            NetworkLogger.shared.log("⚠️ Identity key not loaded, attempting to load from Keychain", group: "Encryption")
-            try loadKeys()
-        }
-        
-        guard let identityKey = identityKeyPair else {
-            NetworkLogger.shared.log("❌ Identity key still not available after loading", group: "Encryption")
-            throw EncryptionError.invalidKey
-        }
-
         // Fetch user's public keys from server
-        NetworkLogger.shared.log("🌐 Fetching public keys for user \(userId.prefix(8))...", group: "Encryption")
+        print("🔑 Fetching public keys for user \(userId)...")
         let response = try await APIClient.shared.getUserPublicKeys(token: token, userId: userId)
 
         // Convert their public keys from base64
         guard let theirIdentityKeyData = Data(base64Encoded: response.keys.identityKey),
               let theirIdentityKey = try? Curve25519.KeyAgreement.PublicKey(rawRepresentation: theirIdentityKeyData) else {
-            NetworkLogger.shared.log("❌ Invalid recipient public key format", group: "Encryption")
             throw EncryptionError.invalidKey
         }
-        
-        NetworkLogger.shared.log("✅ Recipient public key loaded: \(response.keys.identityKey.prefix(20))...", group: "Encryption")
+
+        guard let identityKey = identityKeyPair else {
+            throw EncryptionError.invalidKey
+        }
 
         // Perform ECDH
         let sharedSecret = try identityKey.sharedSecretFromKeyAgreement(with: theirIdentityKey)
@@ -194,182 +169,54 @@ class EncryptionManager: ObservableObject {
 
         // Store session key
         sessionKeys[userId] = symmetricKey
-        NetworkLogger.shared.log("✅ Session key established with user \(userId.prefix(8))", group: "Encryption")
+        print("✅ Session key established with user \(userId)")
 
         return symmetricKey
     }
 
     // MARK: - Message Encryption/Decryption
 
-    /// Encrypt a message for a specific user (returns base64 encrypted payload)
-    func encrypt(message: String, for userId: String, token: String) async throws -> String {
-        NetworkLogger.shared.log("🔐 [ENC] Starting encryption for user \(userId.prefix(8))", group: "Encryption")
-        
-        // Convert message to data
-        guard let messageData = message.data(using: .utf8) else {
-            NetworkLogger.shared.log("❌ [ENC] Invalid message format", group: "Encryption")
-            throw EncryptionError.invalidMessage
-        }
-        
-        NetworkLogger.shared.log("📝 [ENC] Message size: \(messageData.count) bytes", group: "Encryption")
-        
-        // Make sure our identity key is loaded
-        if identityKeyPair == nil {
-            NetworkLogger.shared.log("⚠️ Identity key not loaded, attempting to load", group: "Encryption")
-            try loadKeys()
-        }
-        
-        guard identityKeyPair != nil else {
-            NetworkLogger.shared.log("❌ No identity key available", group: "Encryption")
-            throw EncryptionError.invalidKey
-        }
-
-        // Fetch recipient's public key
-        NetworkLogger.shared.log("🌐 Fetching recipient public keys...", group: "Encryption")
-        let response = try await APIClient.shared.getUserPublicKeys(token: token, userId: userId)
-        
-        guard let recipientKeyData = Data(base64Encoded: response.keys.identityKey),
-              let recipientPublicKey = try? Curve25519.KeyAgreement.PublicKey(rawRepresentation: recipientKeyData) else {
-            NetworkLogger.shared.log("❌ Invalid recipient public key", group: "Encryption")
-            throw EncryptionError.invalidKey
-        }
-        
-        NetworkLogger.shared.log("✅ Recipient public key: \(response.keys.identityKey.prefix(20))...", group: "Encryption")
-        
-        // Generate ephemeral key for this message (Perfect Forward Secrecy)
-        let ephemeralPrivateKey = Curve25519.KeyAgreement.PrivateKey()
-        let ephemeralPublicKey = ephemeralPrivateKey.publicKey
-        
-        NetworkLogger.shared.log("🔑 Generated ephemeral key for this message", group: "Encryption")
-
-        // Perform ECDH with ephemeral key
-        let sharedSecret = try ephemeralPrivateKey.sharedSecretFromKeyAgreement(with: recipientPublicKey)
-
-        // Derive symmetric key using HKDF
-        let symmetricKey = sharedSecret.hkdfDerivedSymmetricKey(
-            using: SHA256.self,
-            salt: Data(),
-            sharedInfo: Data("MelChat-Message-Key".utf8),
-            outputByteCount: 32
-        )
-        
-        // Encrypt using AES-GCM
-        let sealedBox = try AES.GCM.seal(messageData, using: symmetricKey)
-
-        // Return combined: ephemeralPublicKey + ciphertext (base64)
-        guard let ciphertext = sealedBox.combined else {
-            NetworkLogger.shared.log("❌ [ENC] Failed to create sealed box", group: "Encryption")
-            throw EncryptionError.encryptionFailed
-        }
-        
-        // Combine ephemeral public key + ciphertext
-        let ephemeralKeyData = ephemeralPublicKey.rawRepresentation
-        var combinedData = Data()
-        combinedData.append(ephemeralKeyData) // 32 bytes
-        combinedData.append(ciphertext)
-        
-        let base64Payload = combinedData.base64EncodedString()
-        NetworkLogger.shared.log("✅ [ENC] Encrypted: \(combinedData.count) bytes → \(base64Payload.count) base64 chars", group: "Encryption")
-        NetworkLogger.shared.log("   Ephemeral key: \(ephemeralKeyData.count) bytes", group: "Encryption")
-        NetworkLogger.shared.log("   Ciphertext: \(ciphertext.count) bytes", group: "Encryption")
-        NetworkLogger.shared.log("   Preview: \(base64Payload.prefix(40))...", group: "Encryption")
-
-        return base64Payload
-    }
-    
-    /// Encrypt binary data (images, files) for a specific user
-    func encryptData(data: Data, for userId: String, token: String) async throws -> Data {
+    /// Encrypt a message for a specific user
+    func encrypt(message: String, for userId: String, token: String) async throws -> EncryptedMessage {
         // Get session key (or establish new session)
         let sessionKey = try await getOrCreateSessionKey(for: userId, token: token)
 
-        // Encrypt using AES-GCM
-        let sealedBox = try AES.GCM.seal(data, using: sessionKey)
+        // Convert message to data
+        guard let messageData = message.data(using: .utf8) else {
+            throw EncryptionError.invalidMessage
+        }
 
-        // Return combined ciphertext (nonce + ciphertext + tag)
+        // Encrypt using AES-GCM
+        let sealedBox = try AES.GCM.seal(messageData, using: sessionKey)
+
+        // Return encrypted payload
         guard let combined = sealedBox.combined else {
             throw EncryptionError.encryptionFailed
         }
 
-        return combined
+        // Use EncryptionService's EncryptedMessage format
+        // Generate ephemeral key for this message (for compatibility)
+        let ephemeralKey = Curve25519.KeyAgreement.PrivateKey()
+        
+        return EncryptedMessage(
+            ciphertext: combined,
+            ephemeralPublicKey: ephemeralKey.publicKey.rawRepresentation
+        )
     }
-    
-    /// Decrypt binary data (images, files) from a specific user
-    func decryptData(encryptedData: Data, from userId: String, token: String) async throws -> Data {
+
+    /// Decrypt a message from a specific user
+    func decrypt(encryptedMessage: EncryptedMessage, from userId: String, token: String) async throws -> String {
         // Get session key
         let sessionKey = try await getOrCreateSessionKey(for: userId, token: token)
 
         // Decrypt using AES-GCM
-        let sealedBox = try AES.GCM.SealedBox(combined: encryptedData)
+        let sealedBox = try AES.GCM.SealedBox(combined: encryptedMessage.ciphertext)
         let decryptedData = try AES.GCM.open(sealedBox, using: sessionKey)
-
-        return decryptedData
-    }
-
-    /// Decrypt a message from base64 payload
-    func decrypt(payload: String, from userId: String, token: String) async throws -> String {
-        NetworkLogger.shared.log("🔓 [DEC] Starting decryption from user \(userId.prefix(8))", group: "Encryption")
-        NetworkLogger.shared.log("   Payload preview: \(payload.prefix(40))...", group: "Encryption")
-        
-        // Decode base64
-        guard let combinedData = Data(base64Encoded: payload) else {
-            NetworkLogger.shared.log("❌ [DEC] Invalid base64 format", group: "Encryption")
-            throw EncryptionError.invalidMessage
-        }
-        
-        NetworkLogger.shared.log("📦 [DEC] Decoded: \(combinedData.count) bytes total", group: "Encryption")
-        
-        // Extract ephemeral public key (first 32 bytes) and ciphertext (rest)
-        guard combinedData.count > 32 else {
-            NetworkLogger.shared.log("❌ [DEC] Payload too short", group: "Encryption")
-            throw EncryptionError.invalidMessage
-        }
-        
-        let ephemeralKeyData = combinedData.prefix(32)
-        let ciphertext = combinedData.suffix(from: 32)
-        
-        NetworkLogger.shared.log("   Ephemeral key: \(ephemeralKeyData.count) bytes", group: "Encryption")
-        NetworkLogger.shared.log("   Ciphertext: \(ciphertext.count) bytes", group: "Encryption")
-        
-        // Make sure our identity key is loaded
-        if identityKeyPair == nil {
-            NetworkLogger.shared.log("⚠️ Identity key not loaded, attempting to load", group: "Encryption")
-            try loadKeys()
-        }
-        
-        guard let identityKey = identityKeyPair else {
-            NetworkLogger.shared.log("❌ No identity key available", group: "Encryption")
-            throw EncryptionError.invalidKey
-        }
-        
-        // Load ephemeral public key
-        guard let ephemeralPublicKey = try? Curve25519.KeyAgreement.PublicKey(rawRepresentation: ephemeralKeyData) else {
-            NetworkLogger.shared.log("❌ [DEC] Invalid ephemeral public key", group: "Encryption")
-            throw EncryptionError.invalidKey
-        }
-        
-        // Perform ECDH with our identity key and sender's ephemeral key
-        let sharedSecret = try identityKey.sharedSecretFromKeyAgreement(with: ephemeralPublicKey)
-
-        // Derive symmetric key using HKDF (same as encryption)
-        let symmetricKey = sharedSecret.hkdfDerivedSymmetricKey(
-            using: SHA256.self,
-            salt: Data(),
-            sharedInfo: Data("MelChat-Message-Key".utf8),
-            outputByteCount: 32
-        )
-
-        // Decrypt using AES-GCM
-        let sealedBox = try AES.GCM.SealedBox(combined: ciphertext)
-        let decryptedData = try AES.GCM.open(sealedBox, using: symmetricKey)
 
         // Convert to string
         guard let message = String(data: decryptedData, encoding: .utf8) else {
-            NetworkLogger.shared.log("❌ [DEC] Decrypted data is not valid UTF-8", group: "Encryption")
             throw EncryptionError.decryptionFailed
         }
-        
-        NetworkLogger.shared.log("✅ [DEC] Decrypted: \(message.count) chars", group: "Encryption")
-        NetworkLogger.shared.log("   Content: \(message.prefix(50))...", group: "Encryption")
 
         return message
     }

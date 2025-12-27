@@ -20,22 +20,6 @@ class EncryptionService {
             publicKey: publicKey.rawRepresentation
         )
     }
-    
-    // MARK: - Signing
-    
-    /// Sign data with a private key
-    func sign(data: Data, with privateKeyData: Data) -> Data {
-        do {
-            // Convert to signing key
-            let signingKey = try Curve25519.Signing.PrivateKey(rawRepresentation: privateKeyData)
-            let signature = try signingKey.signature(for: data)
-            return signature
-        } catch {
-            // Fallback: Return SHA256 hash as signature (not secure, just for development)
-            NetworkLogger.shared.log("⚠️ Signing failed, using hash fallback: \(error)")
-            return SHA256.hash(data: data).withUnsafeBytes { Data($0) }
-        }
-    }
 
     // MARK: - Encryption
 
