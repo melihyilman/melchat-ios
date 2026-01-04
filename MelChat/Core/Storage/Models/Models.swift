@@ -153,9 +153,16 @@ final class Chat {
     @Attribute(.unique) var id: UUID
     var typeRaw: String
     var otherUserId: UUID?
+    var otherUserName: String?
+    var otherUserDisplayName: String?
     var groupId: UUID?
+    
+    // ⭐️ Enhanced metadata for rich chat list UI
     var lastMessageText: String?
     var lastMessageAt: Date?
+    var lastMessageStatus: String?        // "sent", "delivered", "read"
+    var lastMessageFromMe: Bool = false   // Did I send the last message?
+    
     var unreadCount: Int
     var isPinned: Bool
     var isMuted: Bool
@@ -167,8 +174,10 @@ final class Chat {
 
     init(
         id: UUID = UUID(),
-        type: ChatType,
+        type: ChatType = .oneToOne,
         otherUserId: UUID? = nil,
+        otherUserName: String? = nil,
+        otherUserDisplayName: String? = nil,
         groupId: UUID? = nil,
         unreadCount: Int = 0,
         isPinned: Bool = false,
@@ -177,6 +186,8 @@ final class Chat {
         self.id = id
         self.typeRaw = type.rawValue
         self.otherUserId = otherUserId
+        self.otherUserName = otherUserName
+        self.otherUserDisplayName = otherUserDisplayName
         self.groupId = groupId
         self.unreadCount = unreadCount
         self.isPinned = isPinned

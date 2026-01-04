@@ -25,16 +25,11 @@ class ChatListViewModel: ObservableObject {
     // MARK: - Load Chats
 
     func loadChats() async {
-        guard let token = getToken() else {
-            errorMessage = "Not authenticated"
-            return
-        }
-
         isLoading = true
         errorMessage = nil
 
         do {
-            let response = try await APIClient.shared.getChats(token: token)
+            let response = try await APIClient.shared.getChats()
             chats = response.chats.sorted { ($0.lastMessageAt ?? "") > ($1.lastMessageAt ?? "") }
             NetworkLogger.shared.log("✅ Loaded \(chats.count) chats")
         } catch {
@@ -50,8 +45,6 @@ class ChatListViewModel: ObservableObject {
     func startPolling() {
         stopPolling() // Stop any existing timer
 
-        guard let token = getToken() else { return }
-
         NetworkLogger.shared.log("🔄 Starting message polling (every \(pollingInterval)s)")
 
         pollingTimer = Timer.scheduledTimer(withTimeInterval: pollingInterval, repeats: true) { [weak self] _ in
@@ -66,17 +59,17 @@ class ChatListViewModel: ObservableObject {
         }
     }
 
-    func stopPolling() {
-        pollingTimer?.invalidate()
-        pollingTimer = nil
-        NetworkLogger.shared.log("⏸️ Stopped message polling")
+    nonisolated func stopPolling() {
+        Task { @MainActor in
+            pollingTimer?.invalidate()
+            pollingTimer = nil
+            NetworkLogger.shared.log("⏸️ Stopped message polling")
+        }
     }
 
     private func pollMessages() async {
-        guard let token = getToken() else { return }
-
         do {
-            let response = try await APIClient.shared.pollMessages(token: token)
+            let response = try await APIClient.shared.pollMessages()
 
             if !response.messages.isEmpty {
                 NetworkLogger.shared.log("📬 Received \(response.messages.count) new messages")
@@ -95,42 +88,27 @@ class ChatListViewModel: ObservableObject {
     }
 
     private func handleNewMessage(_ message: OfflineMessage) async {
-        guard let token = getToken() else { return }
-
-        NetworkLogger.shared.log("📨 New message from \(message.from)")
+        NetworkLogger.shared.log("📨 New message from \(message.from)", group: "ChatList")
 
         do {
-            // 1. Decrypt message
-            // Parse the encrypted payload (it should be base64 JSON with ephemeralPublicKey and ciphertext)
-            guard let payloadData = message.payload.data(using: .utf8),
-                  let json = try? JSONSerialization.jsonObject(with: payloadData) as? [String: String],
-                  let ephemeralPublicKeyBase64 = json["ephemeralPublicKey"],
-                  let ciphertextBase64 = json["ciphertext"],
-                  let ephemeralPublicKey = Data(base64Encoded: ephemeralPublicKeyBase64),
-                  let ciphertext = Data(base64Encoded: ciphertextBase64) else {
-                NetworkLogger.shared.log("❌ Invalid encrypted message format")
-                return
-            }
+            // 1. Get sender's public key and decrypt with SimpleEncryption
+            NetworkLogger.shared.log("🔓 Decrypting message with SimpleEncryption...", group: "ChatList")
             
-            let encryptedMsg = EncryptedMessage(
-                ciphertext: ciphertext,
-                ephemeralPublicKey: ephemeralPublicKey
+            let senderPublicKey = try await APIClient.shared.getPublicKey(userId: message.from)
+            
+            let decryptedText = try SimpleEncryption.shared.decrypt(
+                ciphertext: message.encryptedMessage,
+                senderPublicKey: senderPublicKey
             )
 
-            let decryptedText = try await EncryptionManager.shared.decrypt(
-                encryptedMessage: encryptedMsg,
-                from: message.from,
-                token: token
-            )
-
-            NetworkLogger.shared.log("🔓 Decrypted message: \(decryptedText)")
+            NetworkLogger.shared.log("✅ Decrypted message: \(decryptedText.prefix(50))...", group: "ChatList")
 
             // 2. Save to SwiftData
             guard let modelContext = modelContext,
                   let currentUserId = currentUserId else {
                 NetworkLogger.shared.log("⚠️ ModelContext or currentUserId not configured")
                 // Still send ACK even if save fails
-                try? await APIClient.shared.sendAck(token: token, messageId: message.id, status: "delivered")
+                try? await APIClient.shared.sendAck(messageId: message.id, status: "delivered")
                 return
             }
             
@@ -170,7 +148,7 @@ class ChatListViewModel: ObservableObject {
             )
 
             // 3. Send ACK
-            try await APIClient.shared.sendAck(token: token, messageId: message.id, status: "delivered")
+            try await APIClient.shared.sendAck(messageId: message.id, status: "delivered")
             NetworkLogger.shared.log("✅ ACK sent for message \(message.id)")
 
             // Haptic feedback for new message
@@ -204,14 +182,5 @@ class ChatListViewModel: ObservableObject {
                                hashValue & 0xFFFFFFFFFFFF)
         
         return UUID(uuidString: uuidString) ?? UUID()
-    }
-
-    private func getToken() -> String? {
-        let keychainHelper = KeychainHelper()
-        guard let tokenData = try? keychainHelper.load(forKey: KeychainHelper.Keys.authToken),
-              let token = String(data: tokenData, encoding: .utf8) else {
-            return nil
-        }
-        return token
     }
 }

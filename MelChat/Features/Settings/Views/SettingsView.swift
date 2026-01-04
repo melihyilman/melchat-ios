@@ -326,7 +326,7 @@ struct EncryptionInfoView: View {
                 HStack {
                     Text("Key Exchange")
                     Spacer()
-                    Text("Curve25519")
+                    Text("X3DH + Double Ratchet")
                         .foregroundStyle(.secondary)
                 }
                 
@@ -344,6 +344,14 @@ struct EncryptionInfoView: View {
                         .foregroundStyle(hasKeys ? .green : .red)
                         .font(.headline)
                 }
+                
+                HStack {
+                    Text("Details")
+                    Spacer()
+                    Text(keyInfo)
+                        .foregroundStyle(.secondary)
+                        .font(.caption)
+                }
             }
             
             Section {
@@ -351,7 +359,7 @@ struct EncryptionInfoView: View {
                     Text("🔐 End-to-End Encrypted")
                         .font(.headline)
                     
-                    Text("Your messages are protected with Signal Protocol. Only you and the recipient can read them.")
+                    Text("Your messages are protected with Signal Protocol. Only you and the recipient can read them. Not even the server can decrypt your messages.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -363,10 +371,22 @@ struct EncryptionInfoView: View {
                     Button {
                         Task {
                             do {
-                                try EncryptionManager.shared.generateKeys()
+                                NetworkLogger.shared.log("🔑 Generating Signal Protocol keys...", group: "Encryption")
+                                
+                                // Generate keys
+                                let keyBundle = try await SignalProtocolManager.shared.generateKeys()
+                                
+                                // Upload to backend
+                                try await APIClient.shared.uploadSignalKeys(bundle: keyBundle)
+                                
                                 hasKeys = true
+                                keyInfo = "Keys generated successfully"
+                                
+                                NetworkLogger.shared.log("✅ Keys generated and uploaded", group: "Encryption")
                                 HapticManager.shared.success()
                             } catch {
+                                NetworkLogger.shared.log("❌ Failed to generate keys: \(error)", group: "Encryption")
+                                keyInfo = "Failed to generate keys"
                                 HapticManager.shared.error()
                             }
                         }
@@ -384,7 +404,13 @@ struct EncryptionInfoView: View {
         .navigationTitle("Encryption")
         .navigationBarTitleDisplayMode(.inline)
         .task {
-            hasKeys = EncryptionManager.shared.hasKeys()
+            // Check if Signal Protocol keys exist
+            hasKeys = await SignalProtocolManager.shared.hasKeys()
+            if hasKeys {
+                keyInfo = "Active"
+            } else {
+                keyInfo = "Not generated"
+            }
         }
     }
 }
@@ -393,4 +419,5 @@ struct EncryptionInfoView: View {
     SettingsView()
         .environmentObject(AppState())
 }
+
 

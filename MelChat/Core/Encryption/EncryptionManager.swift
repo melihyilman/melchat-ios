@@ -10,7 +10,10 @@ class EncryptionManager: ObservableObject {
 
     // MARK: - Properties
 
-    /// User's long-term identity key pair (Curve25519)
+    /// User's long-term identity key pair for signing (Ed25519)
+    private var identitySigningKeyPair: Curve25519.Signing.PrivateKey?
+
+    /// User's identity key pair for key agreement (Curve25519)
     private var identityKeyPair: Curve25519.KeyAgreement.PrivateKey?
 
     /// User's signed pre-key (rotated periodically)
@@ -28,7 +31,10 @@ class EncryptionManager: ObservableObject {
 
     /// Generate all cryptographic keys (called once during registration)
     func generateKeys() throws {
-        // Generate identity key (long-term)
+        // Generate identity signing key (Ed25519 for signatures)
+        identitySigningKeyPair = Curve25519.Signing.PrivateKey()
+
+        // Generate identity key agreement key (Curve25519 for key exchange)
         identityKeyPair = Curve25519.KeyAgreement.PrivateKey()
 
         // Generate signed pre-key
@@ -48,54 +54,61 @@ class EncryptionManager: ObservableObject {
     /// Load existing keys from Keychain
     func loadKeys() throws {
         let keychainHelper = KeychainHelper()
-        
-        // Load identity key
+
+        // Load identity signing key
+        if let signingKeyData = try? keychainHelper.load(forKey: "com.melchat.identitySigningKey") {
+            identitySigningKeyPair = try Curve25519.Signing.PrivateKey(rawRepresentation: signingKeyData)
+        }
+
+        // Load identity key agreement key
         if let identityKeyData = try? keychainHelper.load(forKey: "com.melchat.identityKey") {
             identityKeyPair = try Curve25519.KeyAgreement.PrivateKey(rawRepresentation: identityKeyData)
         }
-        
+
         // Load signed prekey
         if let prekeyData = try? keychainHelper.load(forKey: "com.melchat.signedPrekey") {
             signedPrekey = try Curve25519.KeyAgreement.PrivateKey(rawRepresentation: prekeyData)
         }
-        
+
         // TODO: Load one-time prekeys (requires custom serialization)
-        
+
         print("✅ Encryption keys loaded from Keychain")
     }
 
     /// Check if keys exist
     func hasKeys() -> Bool {
-        return identityKeyPair != nil
+        return identitySigningKeyPair != nil && identityKeyPair != nil
     }
 
     // MARK: - Key Upload
 
     /// Get public keys bundle for uploading to server
     func getPublicKeyBundle() -> PublicKeyBundle? {
-        guard let identityKey = identityKeyPair,
+        guard let identitySigningKey = identitySigningKeyPair,
+              let identityKey = identityKeyPair,  // ✅ Also get Curve25519 key
               let signedPrekey = signedPrekey else {
             return nil
         }
 
-        // Sign the pre-key with identity key
+        // Sign the pre-key with Ed25519 identity signing key
         let prekeyData = signedPrekey.publicKey.rawRepresentation
-        
-        // Note: Curve25519 signing requires conversion to Curve25519.Signing
-        // For simplicity, we'll use a hash as signature (proper implementation would use Ed25519)
-        let signatureData = SHA256.hash(data: prekeyData)
-        let signature = Data(signatureData)
 
-        // Convert one-time prekeys to base64
-        let onetimePublicKeys = onetimePrekeys.map { key in
-            key.publicKey.rawRepresentation.base64EncodedString()
+        // Use Ed25519 to sign the prekey
+        let signature = try! identitySigningKey.signature(for: prekeyData)
+
+        // Convert one-time prekeys to OneTimePrekey format
+        let oneTimePrekeyObjects = onetimePrekeys.enumerated().map { (index, key) in
+            OneTimePrekey(
+                id: "prekey_\(index)_\(UUID().uuidString)",
+                publicKey: key.publicKey.rawRepresentation.base64EncodedString()
+            )
         }
 
         return PublicKeyBundle(
-            identityKey: identityKey.publicKey.rawRepresentation.base64EncodedString(),
+            identityKey: identitySigningKey.publicKey.rawRepresentation.base64EncodedString(),  // ✅ Ed25519 only
             signedPrekey: signedPrekey.publicKey.rawRepresentation.base64EncodedString(),
             signedPrekeySignature: signature.base64EncodedString(),
-            onetimePrekeys: onetimePublicKeys
+            oneTimePrekeys: oneTimePrekeyObjects
         )
     }
 
@@ -136,7 +149,7 @@ class EncryptionManager: ObservableObject {
     /// Get or create session key for a user
     /// In production, this would fetch the user's public keys from server
     /// For MVP, we'll use a simplified approach
-    func getOrCreateSessionKey(for userId: String, token: String) async throws -> SymmetricKey {
+    func getOrCreateSessionKey(for userId: String) async throws -> SymmetricKey {
         // Check if session already exists
         if let existingKey = sessionKeys[userId] {
             return existingKey
@@ -144,7 +157,7 @@ class EncryptionManager: ObservableObject {
 
         // Fetch user's public keys from server
         print("🔑 Fetching public keys for user \(userId)...")
-        let response = try await APIClient.shared.getUserPublicKeys(token: token, userId: userId)
+        let response = try await APIClient.shared.getUserPublicKeys(userId: userId)
 
         // Convert their public keys from base64
         guard let theirIdentityKeyData = Data(base64Encoded: response.keys.identityKey),
@@ -177,9 +190,9 @@ class EncryptionManager: ObservableObject {
     // MARK: - Message Encryption/Decryption
 
     /// Encrypt a message for a specific user
-    func encrypt(message: String, for userId: String, token: String) async throws -> EncryptedMessage {
+    func encrypt(message: String, for userId: String) async throws -> EncryptedMessage {
         // Get session key (or establish new session)
-        let sessionKey = try await getOrCreateSessionKey(for: userId, token: token)
+        let sessionKey = try await getOrCreateSessionKey(for: userId)
 
         // Convert message to data
         guard let messageData = message.data(using: .utf8) else {
@@ -205,9 +218,9 @@ class EncryptionManager: ObservableObject {
     }
 
     /// Decrypt a message from a specific user
-    func decrypt(encryptedMessage: EncryptedMessage, from userId: String, token: String) async throws -> String {
+    func decrypt(encryptedMessage: EncryptedMessage, from userId: String) async throws -> String {
         // Get session key
-        let sessionKey = try await getOrCreateSessionKey(for: userId, token: token)
+        let sessionKey = try await getOrCreateSessionKey(for: userId)
 
         // Decrypt using AES-GCM
         let sealedBox = try AES.GCM.SealedBox(combined: encryptedMessage.ciphertext)
@@ -224,29 +237,23 @@ class EncryptionManager: ObservableObject {
     // MARK: - Keychain Storage
 
     private func saveKeysToKeychain() throws {
-        guard let identityKey = identityKeyPair,
+        guard let identitySigningKey = identitySigningKeyPair,
+              let identityKey = identityKeyPair,
               let signedPrekey = signedPrekey else {
             throw EncryptionError.invalidKey
         }
 
         let keychainHelper = KeychainHelper()
-        
+
+        try keychainHelper.save(identitySigningKey.rawRepresentation, forKey: "com.melchat.identitySigningKey")
         try keychainHelper.save(identityKey.rawRepresentation, forKey: "com.melchat.identityKey")
         try keychainHelper.save(signedPrekey.rawRepresentation, forKey: "com.melchat.signedPrekey")
-        
+
         // TODO: Save one-time prekeys (requires custom serialization)
     }
 }
 
-// MARK: - Data Models
-
-struct PublicKeyBundle: Codable {
-    let identityKey: String // Base64
-    let signedPrekey: String // Base64
-    let signedPrekeySignature: String // Base64
-    let onetimePrekeys: [String] // Array of Base64 strings
-}
-
+// MARK: - Data Models (DEPRECATED - Use SignalProtocolManager models instead)
 // Note: EncryptedMessage is defined in EncryptionService.swift
 // Note: EncryptionError is defined in EncryptionService.swift
 

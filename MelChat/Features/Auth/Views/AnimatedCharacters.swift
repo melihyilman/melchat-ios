@@ -1,5 +1,61 @@
 import SwiftUI
 
+// MARK: - Pikachu Image View
+/// Real Pikachu character view - use PNG asset named "pikachu"
+struct PikachuImageView: View {
+    let size: CGFloat
+    @State private var isAnimating = false
+    
+    var body: some View {
+        ZStack {
+            // Glow effect
+            Circle()
+                .fill(
+                    RadialGradient(
+                        colors: [Color.yellow.opacity(0.4), Color.clear],
+                        center: .center,
+                        startRadius: 0,
+                        endRadius: size * 0.6
+                    )
+                )
+                .frame(width: size * 1.2, height: size * 1.2)
+                .scaleEffect(isAnimating ? 1.3 : 1.0)
+                .opacity(isAnimating ? 0 : 0.8)
+                .animation(
+                    .easeInOut(duration: 2.0).repeatForever(autoreverses: false),
+                    value: isAnimating
+                )
+            
+            // Pikachu image or fallback
+            pikachuContent
+                .rotationEffect(.degrees(isAnimating ? -3 : 3))
+                .offset(y: isAnimating ? -5 : 5)
+                .animation(
+                    .easeInOut(duration: 1.5).repeatForever(autoreverses: true),
+                    value: isAnimating
+                )
+                .shadow(color: Color.yellow.opacity(0.6), radius: 20, x: 0, y: 10)
+        }
+        .onAppear {
+            isAnimating = true
+        }
+    }
+    
+    @ViewBuilder
+    private var pikachuContent: some View {
+        if UIImage(named: "pikachu") != nil {
+            Image("pikachu")
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: size, height: size)
+        } else {
+            // Fallback: Lightning emoji
+            Text("⚡️")
+                .font(.system(size: size * 0.8))
+        }
+    }
+}
+
 // MARK: - Animated Characters & Empty States
 
 /// Animated Pikachu-style character for welcome screens
@@ -13,7 +69,7 @@ struct WelcomeCharacter: View {
             // Sparkles around character
             if showSparkles {
                 ForEach(0..<6, id: \.self) { index in
-                    SparkleView()
+                    SimpleSparkle()
                         .offset(
                             x: cos(Double(index) * .pi / 3) * 60,
                             y: sin(Double(index) * .pi / 3) * 60
@@ -102,73 +158,119 @@ struct WelcomeCharacter: View {
 /// Empty chat list state
 struct EmptyChatState: View {
     @State private var isAnimating = false
+    @State private var floatOffset: CGFloat = 0
+    @State private var pulseScale: CGFloat = 1.0
     var onNewChatTap: () -> Void = {}
     
     var body: some View {
         VStack(spacing: 30) {
-            // Animated message bubble character
+            // Animated floating chat bubbles stack
             ZStack {
                 // Background glow
                 Circle()
                     .fill(
                         RadialGradient(
-                            colors: [.blue.opacity(0.2), .clear],
+                            colors: [.orange.opacity(0.15), .yellow.opacity(0.1), .clear],
                             center: .center,
                             startRadius: 0,
-                            endRadius: 100
+                            endRadius: 120
                         )
                     )
-                    .frame(width: 200, height: 200)
-                    .scaleEffect(isAnimating ? 1.2 : 0.8)
-                    .opacity(isAnimating ? 0.5 : 0.8)
+                    .frame(width: 240, height: 240)
+                    .scaleEffect(pulseScale)
                     .animation(
-                        .easeInOut(duration: 2.0).repeatForever(autoreverses: true),
-                        value: isAnimating
+                        .easeInOut(duration: 2.5).repeatForever(autoreverses: true),
+                        value: pulseScale
                     )
                 
-                // Message bubble character
-                VStack(spacing: 16) {
-                    // Main bubble
+                // Stack of floating bubbles
+                ZStack {
+                    // Back bubble (purple)
+                    ChatBubbleShape()
+                        .fill(
+                            LinearGradient(
+                                colors: [.purple.opacity(0.6), .purple.opacity(0.4)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 70, height: 50)
+                        .shadow(color: .purple.opacity(0.3), radius: 10, x: 0, y: 5)
+                        .offset(x: -40, y: 30)
+                        .rotationEffect(.degrees(-15))
+                        .scaleEffect(isAnimating ? 1.0 : 0.95)
+                        .offset(y: floatOffset * 0.5)
+                    
+                    // Middle bubble (cyan)
+                    ChatBubbleShape()
+                        .fill(
+                            LinearGradient(
+                                colors: [.cyan, .cyan.opacity(0.7)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 85, height: 60)
+                        .shadow(color: .cyan.opacity(0.4), radius: 12, x: 0, y: 5)
+                        .offset(x: 35, y: -10)
+                        .rotationEffect(.degrees(10))
+                        .scaleEffect(isAnimating ? 1.0 : 0.92)
+                        .offset(y: floatOffset * 0.8)
+                    
+                    // Front bubble (main - orange)
                     ZStack {
-                        RoundedRectangle(cornerRadius: 25)
+                        ChatBubbleShape()
                             .fill(
                                 LinearGradient(
-                                    colors: [.blue, .cyan],
+                                    colors: [.orange, .orange.opacity(0.8)],
                                     startPoint: .topLeading,
                                     endPoint: .bottomTrailing
                                 )
                             )
-                            .frame(width: 120, height: 80)
-                            .shadow(color: .blue.opacity(0.3), radius: 15)
+                            .frame(width: 100, height: 70)
+                            .shadow(color: .orange.opacity(0.5), radius: 15, x: 0, y: 8)
                         
-                        // Dots (thinking animation)
+                        // Animated dots inside
                         HStack(spacing: 8) {
                             ForEach(0..<3) { index in
                                 Circle()
                                     .fill(.white)
-                                    .frame(width: 12, height: 12)
-                                    .opacity(isAnimating ? 1 : 0.3)
+                                    .frame(width: 10, height: 10)
+                                    .scaleEffect(isAnimating ? 1.0 : 0.4)
+                                    .opacity(isAnimating ? 1 : 0.4)
                                     .animation(
                                         .easeInOut(duration: 0.6)
                                             .repeatForever(autoreverses: true)
-                                            .delay(Double(index) * 0.2),
+                                            .delay(Double(index) * 0.15),
                                         value: isAnimating
                                     )
                             }
                         }
                     }
+                    .offset(y: floatOffset)
                     
-                    // Tail
-                    Triangle()
-                        .fill(.cyan)
-                        .frame(width: 20, height: 15)
-                        .offset(x: -40, y: -8)
+                    // Sparkles
+                    if isAnimating {
+                        ForEach(0..<4, id: \.self) { index in
+                            Circle()
+                                .fill(.yellow.opacity(0.6))
+                                .frame(width: 8, height: 8)
+                                .offset(
+                                    x: cos(Double(index) * .pi / 2 + .pi / 4) * 80,
+                                    y: sin(Double(index) * .pi / 2 + .pi / 4) * 80
+                                )
+                                .scaleEffect(isAnimating ? 1.0 : 0.3)
+                                .opacity(isAnimating ? 0.8 : 0)
+                                .animation(
+                                    .easeInOut(duration: 1.5)
+                                        .repeatForever(autoreverses: true)
+                                        .delay(Double(index) * 0.2),
+                                    value: isAnimating
+                                )
+                        }
+                    }
                 }
-                .offset(y: isAnimating ? -5 : 5)
-                .animation(
-                    .easeInOut(duration: 1.5).repeatForever(autoreverses: true),
-                    value: isAnimating
-                )
+                .offset(y: floatOffset)
             }
             
             // Text
@@ -197,21 +299,84 @@ struct EmptyChatState: View {
                 .padding(.vertical, 14)
                 .background(
                     LinearGradient(
-                        colors: [.blue, .cyan],
+                        colors: [.orange, .yellow],
                         startPoint: .leading,
                         endPoint: .trailing
                     )
                 )
                 .clipShape(Capsule())
-                .shadow(color: .blue.opacity(0.3), radius: 10, y: 5)
-                .scaleEffect(1.0)
+                .shadow(color: .orange.opacity(0.3), radius: 10, y: 5)
             }
             .buttonStyle(.plain)
         }
         .padding(.horizontal, 40)
         .onAppear {
             isAnimating = true
+            
+            // Floating animation
+            withAnimation(
+                .easeInOut(duration: 2.0)
+                    .repeatForever(autoreverses: true)
+            ) {
+                floatOffset = -10
+            }
+            
+            // Pulse animation
+            withAnimation(
+                .easeInOut(duration: 2.5)
+                    .repeatForever(autoreverses: true)
+            ) {
+                pulseScale = 1.2
+            }
         }
+    }
+}
+
+// MARK: - Chat Bubble Shape (Clean & Professional)
+struct ChatBubbleShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        
+        let cornerRadius = rect.height * 0.3
+        let tailWidth = rect.width * 0.15
+        let tailHeight = rect.height * 0.2
+        
+        // Start from top-left
+        path.move(to: CGPoint(x: cornerRadius, y: 0))
+        
+        // Top-right corner
+        path.addLine(to: CGPoint(x: rect.maxX - cornerRadius, y: 0))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.maxX, y: cornerRadius),
+            control: CGPoint(x: rect.maxX, y: 0)
+        )
+        
+        // Right side to tail start
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - cornerRadius - tailHeight))
+        
+        // Tail (bottom-right)
+        path.addQuadCurve(
+            to: CGPoint(x: rect.maxX - cornerRadius + tailWidth, y: rect.maxY - tailHeight),
+            control: CGPoint(x: rect.maxX, y: rect.maxY - cornerRadius - tailHeight)
+        )
+        path.addLine(to: CGPoint(x: rect.maxX + tailWidth * 0.5, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.maxX - cornerRadius, y: rect.maxY - tailHeight * 0.3))
+        
+        // Bottom side
+        path.addLine(to: CGPoint(x: cornerRadius, y: rect.maxY - tailHeight * 0.3))
+        path.addQuadCurve(
+            to: CGPoint(x: 0, y: rect.maxY - cornerRadius - tailHeight * 0.3),
+            control: CGPoint(x: 0, y: rect.maxY - tailHeight * 0.3)
+        )
+        
+        // Left side
+        path.addLine(to: CGPoint(x: 0, y: cornerRadius))
+        path.addQuadCurve(
+            to: CGPoint(x: cornerRadius, y: 0),
+            control: CGPoint(x: 0, y: 0)
+        )
+        
+        return path
     }
 }
 
@@ -315,9 +480,10 @@ struct ConfettiView: View {
 
 // MARK: - Helper Shapes
 
-struct SparkleView: View {
+struct SimpleSparkle: View {
     var body: some View {
-        Image(systemName: "sparkle")
+        // Use star.fill for compatibility (sparkle is iOS 16+)
+        Image(systemName: "star.fill")
             .font(.title2)
             .foregroundStyle(
                 LinearGradient(
@@ -332,11 +498,13 @@ struct SparkleView: View {
 struct Arc: Shape {
     let startAngle: Angle
     let endAngle: Angle
+    var centerY: CGFloat = 0.5 // 0.0 = top, 0.5 = middle, 1.0 = bottom (as ratio)
     
     func path(in rect: CGRect) -> Path {
         var path = Path()
+        let centerYPosition = rect.minY + (rect.height * centerY)
         path.addArc(
-            center: CGPoint(x: rect.midX, y: rect.midY),
+            center: CGPoint(x: rect.midX, y: centerYPosition),
             radius: rect.width / 2,
             startAngle: startAngle,
             endAngle: endAngle,
@@ -385,14 +553,14 @@ struct LoadingCharacter: View {
             ZStack {
                 Circle()
                     .stroke(lineWidth: 3)
-                    .fill(.blue.opacity(0.2))
+                    .fill(.orange.opacity(0.2))
                     .frame(width: 60, height: 60)
                 
                 Circle()
                     .trim(from: 0, to: 0.7)
                     .stroke(
                         LinearGradient(
-                            colors: [.blue, .cyan],
+                            colors: [.orange, .yellow],
                             startPoint: .leading,
                             endPoint: .trailing
                         ),
@@ -407,7 +575,7 @@ struct LoadingCharacter: View {
                 
                 Image(systemName: "message.fill")
                     .font(.title2)
-                    .foregroundStyle(.blue)
+                    .foregroundStyle(.orange)
             }
             
             Text("Loading...")

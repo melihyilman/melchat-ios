@@ -24,7 +24,7 @@ class WebSocketManager: ObservableObject {
         #if targetEnvironment(simulator)
         let wsURL = "ws://localhost:3000/ws/messaging"
         #else
-        let wsURL = "ws://192.168.1.100:3000/ws/messaging" // TODO: Mac'in gerçek IP'sini buraya yaz
+        let wsURL = "ws://192.168.1.116:3000/ws/messaging" // TODO: Mac'in gerçek IP'sini buraya yaz
         #endif
         
         guard let url = URL(string: wsURL) else {
@@ -73,7 +73,7 @@ class WebSocketManager: ObservableObject {
 
     // MARK: - Send Message
 
-    func sendMessage(toUserId: String, encryptedPayload: String) {
+    func sendMessage(toUserId: String, encryptedMessage: String) {
         guard isConnected else {
             print("❌ Not connected")
             return
@@ -82,7 +82,7 @@ class WebSocketManager: ObservableObject {
         let message = SendMessagePayload(
             type: "send_message",
             toUserId: toUserId,
-            payload: encryptedPayload
+            encryptedPayload: encryptedMessage  // String
         )
 
         send(message)
@@ -238,8 +238,11 @@ struct WebSocketMessage: Encodable {
 struct SendMessagePayload: Encodable {
     let type: String
     let toUserId: String
-    let payload: String
+    let encryptedPayload: String  // ✅ String (not object)
 }
+
+// DEPRECATED - Old function using object
+// func sendMessage(toUserId: String, encryptedPayload: EncryptedPayload)
 
 struct AckPayload: Encodable {
     let type: String
@@ -251,6 +254,11 @@ struct ReceivedMessage: Codable, Identifiable {
     let id: String
     let from: String
     let to: String
-    let payload: String
+    let encryptedPayload: String  // ✅ Backend sends "encryptedPayload"
     let timestamp: String
+    
+    // Map to encryptedMessage for internal use
+    var encryptedMessage: String {
+        return encryptedPayload
+    }
 }

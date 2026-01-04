@@ -14,19 +14,11 @@ class NewChatViewModel: ObservableObject {
             return
         }
         
-        guard let token = getToken() else {
-            errorMessage = "Not authenticated - Please login first"
-            NetworkLogger.shared.log("⚠️ No auth token found in Keychain")
-            return
-        }
-        
-        NetworkLogger.shared.log("✅ Using auth token: \(token.prefix(20))...")
-        
         isSearching = true
         errorMessage = nil
         
         do {
-            let response = try await APIClient.shared.searchUsers(token: token, query: query)
+            let response = try await APIClient.shared.searchUsers(query: query)
             searchResults = response.users
             
             NetworkLogger.shared.log("✅ Found \(searchResults.count) users")
@@ -45,17 +37,6 @@ class NewChatViewModel: ObservableObject {
     func clearResults() {
         searchResults = []
         errorMessage = nil
-    }
-    
-    // MARK: - Helpers
-    
-    private func getToken() -> String? {
-        let keychainHelper = KeychainHelper()
-        guard let tokenData = try? keychainHelper.load(forKey: KeychainHelper.Keys.authToken),
-              let token = String(data: tokenData, encoding: .utf8) else {
-            return nil
-        }
-        return token
     }
 }
 

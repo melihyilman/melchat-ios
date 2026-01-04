@@ -18,8 +18,10 @@ class ChatViewModel: ObservableObject {
     private var currentUserId: UUID?
     private var chatId: UUID?
     
-    // Notification observer
+    // Notification observer & polling
     private var cancellables = Set<AnyCancellable>()
+    private var pollingTimer: Timer?
+    private let pollingInterval: TimeInterval = 2.0 // Poll every 2 seconds in active chat
 
     init(otherUserId: String, otherUserName: String) {
         self.otherUserId = otherUserId
@@ -29,29 +31,88 @@ class ChatViewModel: ObservableObject {
         setupNotificationListener()
     }
     
+    deinit {
+        // Don't call stopPolling() here - just invalidate timer directly
+        pollingTimer?.invalidate()
+        cancellables.removeAll()
+    }
+    
     // Setup notification listener for new messages
     private func setupNotificationListener() {
         NotificationCenter.default.publisher(for: NSNotification.Name("NewMessageReceived"))
             .sink { [weak self] notification in
-                guard let self = self,
-                      let userInfo = notification.userInfo,
-                      let notificationChatId = userInfo["chatId"] as? String,
-                      let message = userInfo["message"] as? Message,
-                      let myChatId = self.chatId?.uuidString,
-                      notificationChatId == myChatId else {
+                guard let self = self else { return }
+                
+                guard let userInfo = notification.userInfo,
+                      let notificationChatId = userInfo["chatId"] as? String else {
+                    NetworkLogger.shared.log("⚠️ Invalid notification userInfo", group: "Chat")
                     return
                 }
                 
-                // Add message to UI if not already there
-                Task { @MainActor in
-                    if !self.messages.contains(where: { $0.id == message.id }) {
-                        self.messages.append(message)
-                        NetworkLogger.shared.log("✅ New message added to chat UI")
-                        HapticManager.shared.light()
-                    }
+                guard let myChatId = self.chatId?.uuidString else {
+                    NetworkLogger.shared.log("⚠️ My chatId is nil", group: "Chat")
+                    return
+                }
+                
+                NetworkLogger.shared.log("📬 Notification received for chatId: \(notificationChatId), my chatId: \(myChatId)", group: "Chat")
+                
+                if notificationChatId == myChatId {
+                    // Reload from SwiftData to get the new message
+                    /*Task { [weak self] @MainActor in
+                    guard let self else { return }
+                    await self.reloadMessagesFromDB()
+                    NetworkLogger.shared.log("✅ Reloaded messages after notification match", group: "Chat")
+                    HapticManager.shared.light()
+                    }*/
+                } else {
+                    NetworkLogger.shared.log("⚠️ ChatId mismatch, ignoring notification", group: "Chat")
                 }
             }
             .store(in: &cancellables)
+    }
+    
+    // Start polling for new messages (when chat is active)
+    func startPolling() {
+        stopPolling()
+        
+        NetworkLogger.shared.log("🔄 Starting chat polling (every \(pollingInterval)s)", group: "Chat")
+        
+        pollingTimer = Timer.scheduledTimer(withTimeInterval: pollingInterval, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                await self?.reloadMessagesFromDB()
+            }
+        }
+    }
+    
+    // Stop polling
+    func stopPolling() {
+        pollingTimer?.invalidate()
+        pollingTimer = nil
+    }
+    
+    // Reload messages from SwiftData
+    private func reloadMessagesFromDB() async {
+        guard let modelContext = modelContext,
+              let chatId = chatId else {
+            return
+        }
+        
+        do {
+            let descriptor = FetchDescriptor<Message>(
+                predicate: #Predicate { $0.chatId == chatId },
+                sortBy: [SortDescriptor(\.timestamp, order: .forward)]
+            )
+            
+            let fetchedMessages = try modelContext.fetch(descriptor)
+            
+            // Only update if there are new messages
+            if fetchedMessages.count != messages.count {
+                messages = fetchedMessages
+                NetworkLogger.shared.log("📬 Updated chat view with \(messages.count) messages", group: "Chat")
+            }
+        } catch {
+            NetworkLogger.shared.log("❌ Error reloading messages: \(error)", group: "Chat")
+        }
     }
     
     // Configure with SwiftData context and user info
@@ -61,8 +122,8 @@ class ChatViewModel: ObservableObject {
         self.chatId = chatId
         
         // Load messages from local DB
-        Task {
-            await loadMessagesFromLocalDB()
+        Task { [weak self] in
+            await self?.loadMessagesFromLocalDB()
         }
     }
 
@@ -92,16 +153,11 @@ class ChatViewModel: ObservableObject {
     }
 
     func loadMessages() async {
-        guard let token = getToken() else {
-            errorMessage = "Not authenticated"
-            return
-        }
-
         isLoading = true
         errorMessage = nil
 
         do {
-            let response = try await APIClient.shared.getChatMessages(token: token, otherUserId: otherUserId)
+            let response = try await APIClient.shared.getChatMessages(otherUserId: otherUserId)
             NetworkLogger.shared.log("✅ Loaded \(response.messages.count) messages")
 
             // TODO: Load from SwiftData and decrypt
@@ -118,56 +174,55 @@ class ChatViewModel: ObservableObject {
 
     func sendMessage(_ text: String) async {
         guard !text.isEmpty else { return }
-        guard let token = getToken() else {
-            errorMessage = "Not authenticated"
-            return
-        }
-
         isSending = true
         errorMessage = nil
 
         do {
-            // 1. Encrypt message with E2E encryption
-            let encryptedMessage = try await EncryptionManager.shared.encrypt(
+            // ⭐️ SIMPLE E2E - Get recipient's public key
+            NetworkLogger.shared.log("🔑 Fetching recipient's public key...", group: "Chat")
+            let recipientPublicKey = try await APIClient.shared.getPublicKey(userId: otherUserId)
+            
+            // ⭐️ SIMPLE E2E - Encrypt message
+            NetworkLogger.shared.log("🔐 Encrypting message...", group: "Chat")
+            let ciphertext = try SimpleEncryption.shared.encrypt(
                 message: text,
-                for: otherUserId,
-                token: token
+                recipientPublicKey: recipientPublicKey
             )
 
-            // 2. Send to backend (convert ciphertext Data to base64 String)
-            let response = try await APIClient.shared.sendMessage(
-                token: token,
+            // Send to backend (as string)
+            NetworkLogger.shared.log("📤 Sending encrypted message to backend...", group: "Chat")
+            let response = try await APIClient.shared.sendEncryptedMessage(
                 toUserId: otherUserId,
-                encryptedPayload: encryptedMessage.ciphertext.base64EncodedString()
+                encryptedMessage: ciphertext
             )
 
-            NetworkLogger.shared.log("✅ Message sent (encrypted): \(response.messageId)")
+            NetworkLogger.shared.log("✅ Message sent (encrypted): \(response.messageId)", group: "Chat")
 
             // 3. Save to local SwiftData (with proper IDs)
             guard let currentUserId = currentUserId,
                   let chatId = chatId,
                   let modelContext = modelContext else {
-                NetworkLogger.shared.log("⚠️ Missing context for saving message")
+                NetworkLogger.shared.log("⚠️ Missing context for saving message", group: "Chat")
                 isSending = false
                 return
             }
             
             // Convert String messageId to UUID
             guard let messageUUID = UUID(uuidString: response.messageId) else {
-                NetworkLogger.shared.log("⚠️ Invalid message ID format: \(response.messageId)")
+                NetworkLogger.shared.log("⚠️ Invalid message ID format: \(response.messageId)", group: "Chat")
                 isSending = false
                 return
             }
             
             guard let recipientUUID = UUID(uuidString: otherUserId) else {
-                NetworkLogger.shared.log("⚠️ Invalid recipient ID format: \(otherUserId)")
+                NetworkLogger.shared.log("⚠️ Invalid recipient ID format: \(otherUserId)", group: "Chat")
                 isSending = false
                 return
             }
             
             let newMessage = Message(
                 id: messageUUID,
-                content: text, // Store decrypted locally
+                content: text, // Store decrypted locally for quick access
                 senderId: currentUserId,
                 recipientId: recipientUUID,
                 chatId: chatId,
@@ -181,42 +236,20 @@ class ChatViewModel: ObservableObject {
             modelContext.insert(newMessage)
             try modelContext.save()
             
-            // Add to UI
-            messages.append(newMessage)
+            // Reload messages from DB to update UI immediately
+            await reloadMessagesFromDB()
             
-            NetworkLogger.shared.log("💾 Message saved to local DB")
+            NetworkLogger.shared.log("💾 Message saved to local DB and UI updated", group: "Chat")
 
             // Success haptic
             HapticManager.shared.success()
 
         } catch {
             errorMessage = "Failed to send message: \(error.localizedDescription)"
-            NetworkLogger.shared.log("❌ Error sending message: \(error)")
+            NetworkLogger.shared.log("❌ Error sending message: \(error)", group: "Chat")
             HapticManager.shared.error()
         }
 
         isSending = false
-    }
-
-    // MARK: - Helpers
-
-    private func getToken() -> String? {
-        // Get token from Keychain
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrAccount as String: "authToken",
-            kSecReturnData as String: true
-        ]
-
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-
-        guard status == errSecSuccess,
-              let data = result as? Data,
-              let token = String(data: data, encoding: .utf8) else {
-            return nil
-        }
-
-        return token
     }
 }

@@ -6,41 +6,98 @@ struct ChatListView: View {
     @StateObject private var viewModel = ChatListViewModel()
     @State private var showNewChat = false
     @State private var searchText = ""
+    @State private var navigationPath = NavigationPath()  // ⭐️ NEW: For programmatic navigation
+    @State private var selectedChat: ChatInfo?  // ⭐️ NEW: For new chat
     
     // SwiftData context
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject var appState: AppState
+    
+    // IMPORTANT: Query SwiftData for real-time updates
+    @Query(sort: \Chat.lastMessageAt, order: .reverse) private var localChats: [Chat]
+    
+    // Computed property to merge and deduplicate chats
+    private var allChats: [ChatInfo] {
+        // Convert local SwiftData chats to ChatInfo
+        var chatDict: [String: ChatInfo] = [:]
+        
+        // Add local chats first (priority)
+        for chat in localChats {
+            guard let userId = chat.otherUserId?.uuidString else { continue }
+            
+            chatDict[userId] = ChatInfo(
+                userId: userId,
+                username: chat.otherUserName ?? "Unknown",
+                displayName: chat.otherUserDisplayName,
+                isOnline: false, // Will be updated from backend
+                lastSeen: nil,
+                lastMessage: chat.lastMessageText,
+                lastMessageAt: chat.lastMessageAt?.ISO8601Format(),
+                lastMessageStatus: chat.lastMessageStatus,
+                unreadCount: chat.unreadCount,
+                lastMessageFromMe: chat.lastMessageFromMe
+            )
+        }
+        
+        // Merge with backend chats (don't duplicate)
+        for backendChat in viewModel.chats {
+            // Only add if not already in local
+            if chatDict[backendChat.userId] == nil {
+                chatDict[backendChat.userId] = backendChat
+            }
+        }
+        
+        // Sort by lastMessageAt
+        return chatDict.values.sorted { (chat1, chat2) -> Bool in
+            guard let date1 = chat1.lastMessageAt,
+                  let date2 = chat2.lastMessageAt else {
+                return false
+            }
+            return date1 > date2
+        }
+    }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $navigationPath) {
             ZStack {
-                if viewModel.chats.isEmpty && !viewModel.isLoading {
+                if allChats.isEmpty && !viewModel.isLoading {
                     // Empty State
                     emptyStateView
                 } else {
-                    // Chat List
+                    // Chat List with animations
                     ScrollView {
                         LazyVStack(spacing: 0) {
-                            ForEach(filteredChats) { chat in
-                                NavigationLink {
-                                    ChatDetailView(chat: chat)
-                                } label: {
+                            ForEach(Array(filteredChats.enumerated()), id: \.element.id) { index, chat in
+                                NavigationLink(value: chat) {
                                     ChatRow(chat: chat)
                                 }
                                 .buttonStyle(.plain)
+                                .transition(.asymmetric(
+                                    insertion: .move(edge: .trailing).combined(with: .opacity),
+                                    removal: .scale.combined(with: .opacity)
+                                ))
+                                .animation(.spring(response: 0.4, dampingFraction: 0.8).delay(Double(index) * 0.05), value: filteredChats.count)
 
-                                Divider()
-                                    .padding(.leading, 88)
+                                if index < filteredChats.count - 1 {
+                                    Divider()
+                                        .padding(.leading, 90)
+                                        .transition(.opacity)
+                                }
                             }
                         }
+                        .padding(.vertical, 4)
                     }
                     .refreshable {
+                        HapticManager.shared.light()
                         await viewModel.loadChats()
                     }
                 }
             }
             .searchable(text: $searchText, prompt: "Search chats")
             .navigationTitle("Chats")
+            .navigationDestination(for: ChatInfo.self) { chat in
+                ChatDetailView(chat: chat)
+            }
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
@@ -49,12 +106,42 @@ struct ChatListView: View {
                     } label: {
                         Image(systemName: "square.and.pencil")
                             .font(.title3)
-                            .foregroundStyle(.blue)
+                            .foregroundStyle(.orange)
                     }
                 }
             }
             .sheet(isPresented: $showNewChat) {
                 NewChatView()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("StartNewChat"))) { notification in
+                // ⭐️ Handle new chat notification
+                guard let userInfo = notification.userInfo,
+                      let userId = userInfo["userId"] as? String,
+                      let username = userInfo["username"] as? String,
+                      let displayName = userInfo["displayName"] as? String else {
+                    return
+                }
+                
+                NetworkLogger.shared.log("📱 Received StartNewChat notification for \(username)", group: "ChatList")
+                
+                // Create ChatInfo and navigate
+                let newChat = ChatInfo(
+                    userId: userId,
+                    username: username,
+                    displayName: displayName,
+                    isOnline: false,
+                    lastSeen: nil,
+                    lastMessage: nil,
+                    lastMessageAt: nil,
+                    lastMessageStatus: nil,
+                    unreadCount: nil,
+                    lastMessageFromMe: nil
+                )
+                
+                // Navigate to chat
+                navigationPath.append(newChat)
+                
+                HapticManager.shared.success()
             }
             .task {
                 // Configure ChatListViewModel with SwiftData context
@@ -77,8 +164,16 @@ struct ChatListView: View {
                 viewModel.stopPolling()
             }
             .overlay {
-                if viewModel.isLoading && viewModel.chats.isEmpty {
-                    ProgressView()
+                if viewModel.isLoading && allChats.isEmpty {
+                    VStack(spacing: 20) {
+                        PikachuAnimationView(
+                            size: 100,
+                            showMessage: true,
+                            message: "Loading chats..."
+                        )
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color(.systemBackground))
                 }
             }
         }
@@ -86,9 +181,9 @@ struct ChatListView: View {
 
     private var filteredChats: [ChatInfo] {
         if searchText.isEmpty {
-            return viewModel.chats
+            return allChats
         }
-        return viewModel.chats.filter { chat in
+        return allChats.filter { chat in
             chat.username.localizedCaseInsensitiveContains(searchText) ||
             (chat.displayName?.localizedCaseInsensitiveContains(searchText) ?? false)
         }
@@ -96,26 +191,21 @@ struct ChatListView: View {
 
     private var emptyStateView: some View {
         VStack(spacing: 24) {
-            ZStack {
-                Circle()
-                    .fill(Color.blue.opacity(0.1))
-                    .frame(width: 120, height: 120)
-
-                Image(systemName: "message.fill")
-                    .font(.system(size: 50))
-                    .foregroundStyle(.blue.gradient)
-            }
+            // ⚡️ Pikachu Animation
+            PikachuAnimationView(
+                size: 120,
+                showMessage: true,
+                message: "No Chats Yet"
+            )
 
             VStack(spacing: 8) {
-                Text("No Chats Yet")
-                    .font(.title2.bold())
-
                 Text("Start a conversation with someone")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
 
             Button {
+                HapticManager.shared.success()
                 showNewChat = true
             } label: {
                 Label("New Chat", systemImage: "plus.message.fill")
@@ -123,95 +213,208 @@ struct ChatListView: View {
                     .foregroundStyle(.white)
                     .padding(.horizontal, 24)
                     .padding(.vertical, 12)
-                    .background(Color.blue.gradient)
+                    .background(
+                        LinearGradient(
+                            colors: [.yellow, .orange],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
                     .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .shadow(color: .blue.opacity(0.3), radius: 10, y: 5)
+                    .shadow(color: .orange.opacity(0.3), radius: 10, y: 5)
             }
         }
         .padding()
     }
 }
 
-// MARK: - Chat Row
+// MARK: - Chat Row (Modern WhatsApp-like Design with Animations)
 struct ChatRow: View {
     let chat: ChatInfo
-
+    @State private var isPressing = false
+    @State private var hasUnreadAnimation = false
+    
     var body: some View {
-        HStack(spacing: 16) {
-            // Avatar
-            AvatarView(
-                name: chat.displayName ?? chat.username,
-                size: 60
-            )
-            .shadow(color: .black.opacity(0.05), radius: 4, y: 2)
+        HStack(spacing: 14) {
+            // Avatar with online indicator
+            ZStack(alignment: .bottomTrailing) {
+                AvatarView(
+                    name: chat.displayNameOrUsername,
+                    size: 60
+                )
+                .shadow(color: .black.opacity(0.08), radius: 6, y: 3)
+                
+                // Online indicator with pulse animation
+                if chat.isOnline {
+                    ZStack {
+                        // Pulse ring
+                        Circle()
+                            .fill(Color.green.opacity(0.3))
+                            .frame(width: 20, height: 20)
+                            .scaleEffect(hasUnreadAnimation ? 1.4 : 1.0)
+                            .opacity(hasUnreadAnimation ? 0 : 1)
+                        
+                        // Main online dot
+                        Circle()
+                            .fill(Color.green)
+                            .frame(width: 16, height: 16)
+                            .overlay(
+                                Circle()
+                                    .stroke(Color(.systemBackground), lineWidth: 2.5)
+                            )
+                    }
+                    .onAppear {
+                        withAnimation(
+                            .easeOut(duration: 1.5)
+                                .repeatForever(autoreverses: false)
+                        ) {
+                            hasUnreadAnimation = true
+                        }
+                    }
+                }
+            }
 
             // Content
             VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Text(chat.displayName ?? chat.username)
-                        .font(.headline)
+                // Top row: Name + Time
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(chat.displayNameOrUsername)
+                        .font(.system(size: 17, weight: .semibold))
                         .foregroundStyle(.primary)
+                        .lineLimit(1)
 
-                    Spacer()
+                    Spacer(minLength: 8)
 
-                    if let lastMessageAt = chat.lastMessageAt {
-                        Text(formattedDate(lastMessageAt))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                    // Time
+                    if let time = chat.formattedLastMessageTime {
+                        Text(time)
+                            .font(.system(size: 13))
+                            .foregroundStyle(hasUnreadCount ? .orange : .secondary)
                     }
                 }
 
-                HStack(spacing: 4) {
-                    if chat.isOnline {
-                        Circle()
-                            .fill(Color.green)
-                            .frame(width: 8, height: 8)
+                // Bottom row: Status icon + Last message + Unread badge
+                HStack(alignment: .center, spacing: 6) {
+                    // Status icon (if message from me)
+                    if let fromMe = chat.lastMessageFromMe, fromMe, let status = chat.lastMessageStatus {
+                        statusIcon(status)
+                    }
+                    
+                    // Last message preview
+                    if let lastMessage = chat.lastMessage {
+                        Text(lastMessage)
+                            .font(.system(size: 15))
+                            .foregroundStyle(hasUnreadCount ? .primary : .secondary)
+                            .fontWeight(hasUnreadCount ? .medium : .regular)
+                            .lineLimit(1)
+                    } else {
+                        Text("No messages yet")
+                            .font(.system(size: 15))
+                            .foregroundStyle(.tertiary)
+                            .italic()
                     }
 
-                    Text(chat.isOnline ? "Online" : "Offline")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-
-                    Spacer()
-
-                    if let status = chat.lastMessageStatus {
-                        Image(systemName: statusIcon(status))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                    Spacer(minLength: 8)
+                    
+                    // Unread badge
+                    if let unreadCount = chat.unreadCount, unreadCount > 0 {
+                        UnreadBadge(count: unreadCount)
                     }
                 }
             }
         }
         .padding(.vertical, 12)
-        .padding(.horizontal, 20)
-        .background(Color(.systemBackground))
+        .padding(.horizontal, 16)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(hasUnreadCount ? Color.orange.opacity(0.05) : Color.clear)
+                .animation(.easeInOut(duration: 0.2), value: hasUnreadCount)
+        )
+        .scaleEffect(isPressing ? 0.97 : 1.0)
+        .animation(.easeInOut(duration: 0.15), value: isPressing)
+        .onLongPressGesture(minimumDuration: .infinity, maximumDistance: .infinity, pressing: { pressing in
+            isPressing = pressing
+            if pressing {
+                HapticManager.shared.light()
+            }
+        }, perform: {})
     }
-
-    private func formattedDate(_ dateString: String) -> String {
-        // Parse ISO string and format
-        guard let date = ISO8601DateFormatter().date(from: dateString) else {
-            return ""
+    
+    private var hasUnreadCount: Bool {
+        if let count = chat.unreadCount, count > 0 {
+            return true
         }
-
-        let calendar = Calendar.current
-        if calendar.isDateInToday(date) {
-            return date.formatted(date: .omitted, time: .shortened)
-        } else if calendar.isDateInYesterday(date) {
-            return "Yesterday"
-        } else if calendar.isDate(date, equalTo: Date(), toGranularity: .weekOfYear) {
-            return date.formatted(.dateTime.weekday(.abbreviated))
-        } else {
-            return date.formatted(date: .abbreviated, time: .omitted)
-        }
+        return false
     }
-
-    private func statusIcon(_ status: String) -> String {
+    
+    @ViewBuilder
+    private func statusIcon(_ status: String) -> some View {
         switch status.lowercased() {
-        case "delivered": return "checkmark.circle"
-        case "read": return "checkmark.circle.fill"
-        case "queued": return "clock"
-        default: return "checkmark"
+        case "sent":
+            Image(systemName: "checkmark")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.gray)
+        case "delivered":
+            HStack(spacing: -4) {
+                Image(systemName: "checkmark")
+                Image(systemName: "checkmark")
+            }
+            .font(.system(size: 14, weight: .semibold))
+            .foregroundStyle(.gray)
+        case "read":
+            HStack(spacing: -4) {
+                Image(systemName: "checkmark")
+                Image(systemName: "checkmark")
+            }
+            .font(.system(size: 14, weight: .semibold))
+            .foregroundStyle(.orange)
+        default:
+            Image(systemName: "clock")
+                .font(.system(size: 14))
+                .foregroundStyle(.gray)
         }
+    }
+}
+
+// MARK: - Unread Badge Component
+struct UnreadBadge: View {
+    let count: Int
+    @State private var isAnimating = false
+    
+    var body: some View {
+        Text(count > 99 ? "99+" : "\(count)")
+            .font(.system(size: 12, weight: .bold))
+            .foregroundStyle(.white)
+            .frame(minWidth: 22, minHeight: 22)
+            .padding(.horizontal, count > 9 ? 6 : 0)
+            .background(
+                ZStack {
+                    // Pulse effect
+                    Circle()
+                        .fill(Color.orange.opacity(0.3))
+                        .scaleEffect(isAnimating ? 1.4 : 1.0)
+                        .opacity(isAnimating ? 0 : 0.6)
+                    
+                    // Main badge
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [.orange, .orange.opacity(0.8)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                }
+            )
+            .shadow(color: .orange.opacity(0.4), radius: 4, y: 2)
+            .onAppear {
+                withAnimation(
+                    .easeOut(duration: 1.0)
+                        .repeatForever(autoreverses: false)
+                ) {
+                    isAnimating = true
+                }
+            }
     }
 }
 
@@ -221,6 +424,7 @@ struct ChatDetailView: View {
     @StateObject private var viewModel: ChatViewModel
     @State private var messageText = ""
     @State private var isTyping = false // TODO: Connect to backend typing events
+    @State private var showCelebration = false // ⚡️ Pikachu celebration
     @FocusState private var isMessageFocused: Bool
     
     // SwiftData context
@@ -240,21 +444,46 @@ struct ChatDetailView: View {
             // Messages
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(spacing: 12) {
-                        ForEach(viewModel.messages) { message in
-                            MessageBubble(message: message)
-                                .transition(.opacity.combined(with: .scale(scale: 0.95)))
-                                .id(message.id)
+                    if viewModel.messages.isEmpty && !viewModel.isLoading {
+                        // Empty state - Pikachu waiting for first message
+                        VStack(spacing: 20) {
+                            Spacer()
+                            
+                            PikachuAnimationView(
+                                size: 100,
+                                showMessage: true,
+                                message: "Say hi! ⚡️"
+                            )
+                            
+                            Text("Start the conversation")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                            
+                            Spacer()
                         }
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                    } else {
+                        LazyVStack(spacing: 12) {
+                            ForEach(viewModel.messages) { message in
+                                MessageBubble(message: message)
+                                    .transition(.asymmetric(
+                                        insertion: .scale(scale: 0.8).combined(with: .opacity),
+                                        removal: .opacity
+                                    ))
+                                    .animation(.spring(response: 0.3, dampingFraction: 0.7), value: viewModel.messages.count)
+                                    .id(message.id)
+                            }
 
-                        // Typing indicator
-                        if isTyping {
-                            TypingIndicatorView()
-                                .transition(.opacity.combined(with: .move(edge: .bottom)))
-                                .id("typing")
+                            // Typing indicator
+                            if isTyping {
+                                TypingIndicatorView()
+                                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+                                    .id("typing")
+                            }
                         }
+                        .padding()
                     }
-                    .padding()
                 }
                 .scrollDismissesKeyboard(.interactively)
                 .onTapGesture {
@@ -262,18 +491,43 @@ struct ChatDetailView: View {
                     HapticManager.shared.light()
                 }
                 .onChange(of: viewModel.messages.count) { oldValue, newValue in
-                    // Auto-scroll to latest message
+                    // Auto-scroll to latest message with smooth animation
+                    if newValue > oldValue, let lastMessage = viewModel.messages.last {
+                        // Small delay to ensure view is rendered
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                                proxy.scrollTo(lastMessage.id, anchor: .bottom)
+                            }
+                        }
+                    }
+                }
+                .onAppear {
+                    // Scroll to bottom on initial load
                     if let lastMessage = viewModel.messages.last {
-                        withAnimation(.easeOut(duration: 0.3)) {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                             proxy.scrollTo(lastMessage.id, anchor: .bottom)
                         }
+                    }
+                }
+                .overlay {
+                    // Loading state - Pikachu loading
+                    if viewModel.isLoading && viewModel.messages.isEmpty {
+                        VStack(spacing: 20) {
+                            PikachuAnimationView(
+                                size: 80,
+                                showMessage: true,
+                                message: "Loading..."
+                            )
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Color(.systemBackground))
                     }
                 }
             }
 
             Divider()
 
-            // Input
+            // Input Bar
             HStack(spacing: 12) {
                 HStack(spacing: 8) {
                     TextField("Message", text: $messageText, axis: .vertical)
@@ -284,6 +538,19 @@ struct ChatDetailView: View {
                         .onSubmit {
                             sendMessage()
                         }
+                    
+                    // Clear button (when typing)
+                    if !messageText.isEmpty {
+                        Button {
+                            messageText = ""
+                            HapticManager.shared.light()
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.secondary)
+                                .font(.system(size: 16))
+                        }
+                        .transition(.scale.combined(with: .opacity))
+                    }
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
@@ -291,24 +558,41 @@ struct ChatDetailView: View {
                     RoundedRectangle(cornerRadius: 22)
                         .fill(Color(.systemGray6))
                 )
+                .animation(.spring(response: 0.3), value: messageText.isEmpty)
 
+                // Send button
                 Button {
                     sendMessage()
                 } label: {
                     ZStack {
                         Circle()
-                            .fill(messageText.isEmpty ? Color.gray.gradient : Color.blue.gradient)
+                            .fill(messageText.isEmpty ? 
+                                AnyShapeStyle(Color.gray.gradient) : 
+                                AnyShapeStyle(LinearGradient(colors: [.orange, .yellow], startPoint: .topLeading, endPoint: .bottomTrailing))
+                            )
                             .frame(width: 44, height: 44)
+                            .shadow(
+                                color: messageText.isEmpty ? .clear : .orange.opacity(0.4),
+                                radius: 8,
+                                y: 2
+                            )
 
-                        Image(systemName: "arrow.up")
+                        Image(systemName: viewModel.isSending ? "hourglass" : "arrow.up")
                             .font(.headline.bold())
                             .foregroundStyle(.white)
+                            .rotationEffect(.degrees(viewModel.isSending ? 180 : 0))
+                            .animation(.easeInOut(duration: 0.3), value: viewModel.isSending)
                     }
                 }
                 .disabled(messageText.isEmpty || viewModel.isSending)
+                .animation(.spring(response: 0.3, dampingFraction: 0.7), value: messageText.isEmpty)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
+            .background(
+                Color(.systemBackground)
+                    .shadow(color: .black.opacity(0.05), radius: 8, y: -2)
+            )
         }
         .navigationTitle(chat.displayName ?? chat.username)
         .navigationBarTitleDisplayMode(.inline)
@@ -323,17 +607,6 @@ struct ChatDetailView: View {
                             .font(.caption)
                             .foregroundStyle(.green)
                     }
-                }
-            }
-
-            ToolbarItem(placement: .keyboard) {
-                HStack {
-                    Spacer()
-                    Button("Done") {
-                        isMessageFocused = false
-                    }
-                    .font(.headline)
-                    .foregroundStyle(.blue)
                 }
             }
         }
@@ -354,6 +627,22 @@ struct ChatDetailView: View {
             )
             
             await viewModel.loadMessages()
+            
+            // Start polling for real-time updates
+            viewModel.startPolling()
+        }
+        .onDisappear {
+            // Stop polling when leaving chat
+            viewModel.stopPolling()
+        }
+        .overlay {
+            // ⚡️ Pikachu celebration overlay
+            if showCelebration {
+                PikachuCelebrationView {
+                    showCelebration = false
+                }
+                .zIndex(1000)
+            }
         }
     }
     
@@ -388,6 +677,9 @@ struct ChatDetailView: View {
         let text = messageText
         messageText = ""
         isMessageFocused = false
+        
+        // ⚡️ Show Pikachu celebration
+        showCelebration = true
 
         Task {
             await viewModel.sendMessage(text)
@@ -409,7 +701,10 @@ struct MessageBubble: View {
                     .padding(.vertical, 10)
                     .background(
                         RoundedRectangle(cornerRadius: 18)
-                            .fill(message.isFromCurrentUser ? Color.blue.gradient : Color(.systemGray5).gradient)
+                            .fill(message.isFromCurrentUser ? 
+                                AnyShapeStyle(LinearGradient(colors: [.orange, .yellow], startPoint: .topLeading, endPoint: .bottomTrailing)) : 
+                                AnyShapeStyle(Color(.systemGray5).gradient)
+                            )
                     )
                     .foregroundStyle(message.isFromCurrentUser ? .white : .primary)
 
@@ -446,7 +741,7 @@ struct MessageBubble: View {
         case .read:
             Image(systemName: "checkmark.checkmark")
                 .font(.caption2)
-                .foregroundStyle(.blue)
+                .foregroundStyle(.orange)
         case .failed:
             Image(systemName: "exclamationmark.circle.fill")
                 .font(.caption2)
@@ -459,17 +754,133 @@ struct MessageBubble: View {
 struct NewChatView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var searchText = ""
-
+    @State private var searchResults: [UserSearchResult] = []
+    @State private var isSearching = false
+    @State private var errorMessage: String?
+    
+    @EnvironmentObject var appState: AppState
+    
     var body: some View {
         NavigationStack {
-            VStack {
-                Text("Coming Soon")
-                    .font(.title2)
-                    .foregroundStyle(.secondary)
-
-                Text("Search for users by username")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+            VStack(spacing: 0) {
+                // Search bar (sabit kalacak)
+                HStack(spacing: 12) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(.secondary)
+                    
+                    TextField("Search by username", text: $searchText)
+                        .textFieldStyle(.plain)
+                        .autocapitalization(.none)
+                        .autocorrectionDisabled()
+                        .submitLabel(.search)
+                        .onSubmit {
+                            Task {
+                                await searchUsers()
+                            }
+                        }
+                    
+                    if !searchText.isEmpty {
+                        Button {
+                            searchText = ""
+                            searchResults = []
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.secondary)
+                        }
+                        .transition(.scale.combined(with: .opacity))
+                    }
+                }
+                .padding()
+                .background(Color(.systemGray6))
+                .animation(.easeInOut(duration: 0.2), value: searchText.isEmpty)
+                
+                Divider()
+                
+                // Results area - ZStack ile smooth geçişler
+                ZStack {
+                    if isSearching {
+                        VStack(spacing: 20) {
+                            Spacer()
+                            PikachuAnimationView(
+                                size: 80,
+                                showMessage: true,
+                                message: "Searching..."
+                            )
+                            Spacer()
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .transition(.opacity)
+                    } else if let error = errorMessage {
+                        VStack(spacing: 16) {
+                            Spacer()
+                            Image(systemName: "exclamationmark.triangle")
+                                .font(.system(size: 50))
+                                .foregroundStyle(.orange)
+                            
+                            Text(error)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                                .padding()
+                            Spacer()
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .transition(.opacity)
+                    } else if searchResults.isEmpty && !searchText.isEmpty {
+                        VStack(spacing: 20) {
+                            Spacer()
+                            PikachuAnimationView(
+                                size: 100,
+                                showMessage: true,
+                                message: "No users found"
+                            )
+                            
+                            Text("Try searching with a different username")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                            Spacer()
+                        }
+                        .padding()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .transition(.opacity)
+                    } else if searchResults.isEmpty {
+                        VStack(spacing: 20) {
+                            Spacer()
+                            PikachuAnimationView(
+                                size: 100,
+                                showMessage: true,
+                                message: "Search for Users"
+                            )
+                            
+                            Text("Enter a username to start a conversation")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                            Spacer()
+                        }
+                        .padding()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .transition(.opacity)
+                    } else {
+                        ScrollView {
+                            LazyVStack(spacing: 0) {
+                                ForEach(searchResults) { user in
+                                    Button {
+                                        startChat(with: user)
+                                    } label: {
+                                        UserSearchRow(user: user)
+                                    }
+                                    .buttonStyle(.plain)
+                                    
+                                    Divider()
+                                        .padding(.leading, 72)
+                                }
+                            }
+                        }
+                        .transition(.opacity)
+                    }
+                }
             }
             .navigationTitle("New Chat")
             .navigationBarTitleDisplayMode(.inline)
@@ -482,11 +893,148 @@ struct NewChatView: View {
             }
         }
     }
+    
+    private func searchUsers() async {
+        guard !searchText.isEmpty else { return }
+        
+        isSearching = true
+        errorMessage = nil
+        
+        do {
+            NetworkLogger.shared.log("🔍 Searching users: \(searchText)", group: "NewChat")
+            
+            let response = try await APIClient.shared.searchUsers(query: searchText)
+            
+            searchResults = response.users
+            
+            NetworkLogger.shared.log("✅ Found \(searchResults.count) users", group: "NewChat")
+            
+        } catch {
+            errorMessage = "Search failed. Please try again."
+            NetworkLogger.shared.log("❌ Search error: \(error)", group: "NewChat")
+        }
+        
+        isSearching = false
+    }
+    
+    private func startChat(with user: UserSearchResult) {
+        HapticManager.shared.light()
+        
+        NetworkLogger.shared.log("💬 Starting chat with \(user.username)", group: "NewChat")
+        
+        // Send notification to ChatListView to navigate
+        NotificationCenter.default.post(
+            name: NSNotification.Name("StartNewChat"),
+            object: nil,
+            userInfo: [
+                "userId": user.id,
+                "username": user.username,
+                "displayName": user.displayName ?? user.username
+            ]
+        )
+        
+        // Dismiss sheet
+        dismiss()
+    }
+}
+
+// MARK: - User Search Row
+struct UserSearchRow: View {
+    let user: UserSearchResult
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            // Avatar
+            AvatarView(
+                name: user.displayName ?? user.username,
+                size: 50
+            )
+            
+            // User info
+            VStack(alignment: .leading, spacing: 4) {
+                Text(user.displayName ?? user.username)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.primary)
+                
+                HStack(spacing: 4) {
+                    Text("@\(user.username)")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.secondary)
+                    
+                    if user.isOnline {
+                        Circle()
+                            .fill(Color.green)
+                            .frame(width: 6, height: 6)
+                    }
+                }
+            }
+            
+            Spacer()
+            
+            Image(systemName: "chevron.right")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(Color(.systemBackground))
+        .contentShape(Rectangle())
+    }
 }
 
 // MARK: - Previews
 #Preview("Chat List") {
     ChatListView()
+}
+
+#Preview("New Chat") {
+    NewChatView()
+        .environmentObject(AppState())
+}
+
+#Preview("Chat Row - With Unread") {
+    VStack(spacing: 0) {
+        ChatRow(chat: ChatInfo(
+            userId: "1",
+            username: "alice",
+            displayName: "Alice Johnson",
+            isOnline: true,
+            lastSeen: nil,
+            lastMessage: "Hey! Did you see that new feature? It's amazing! 🎉",
+            lastMessageAt: ISO8601DateFormatter().string(from: Date()),
+            lastMessageStatus: "read",
+            unreadCount: 3,
+            lastMessageFromMe: false
+        ))
+        Divider().padding(.leading, 72)
+        
+        ChatRow(chat: ChatInfo(
+            userId: "2",
+            username: "bob",
+            displayName: "Bob Smith",
+            isOnline: false,
+            lastSeen: ISO8601DateFormatter().string(from: Date().addingTimeInterval(-3600)),
+            lastMessage: "Sure, sounds good! See you tomorrow 👋",
+            lastMessageAt: ISO8601DateFormatter().string(from: Date().addingTimeInterval(-86400)),
+            lastMessageStatus: "delivered",
+            unreadCount: 0,
+            lastMessageFromMe: true
+        ))
+        Divider().padding(.leading, 72)
+        
+        ChatRow(chat: ChatInfo(
+            userId: "3",
+            username: "charlie",
+            displayName: "Charlie Brown",
+            isOnline: false,
+            lastSeen: ISO8601DateFormatter().string(from: Date().addingTimeInterval(-172800)),
+            lastMessage: nil,
+            lastMessageAt: nil,
+            lastMessageStatus: nil,
+            unreadCount: 0,
+            lastMessageFromMe: nil
+        ))
+    }
 }
 
 #Preview("Chat Detail") {
@@ -497,8 +1045,11 @@ struct NewChatView: View {
             displayName: "Test User",
             isOnline: true,
             lastSeen: nil,
+            lastMessage: "Hey! How are you doing?",
             lastMessageAt: ISO8601DateFormatter().string(from: Date()),
-            lastMessageStatus: "delivered"
+            lastMessageStatus: "delivered",
+            unreadCount: 3,
+            lastMessageFromMe: false
         ))
     }
 }

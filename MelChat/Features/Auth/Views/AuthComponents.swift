@@ -1,5 +1,27 @@
 import SwiftUI
 
+// MARK: - Feature Pill
+struct FeaturePill: View {
+    let icon: String
+    let text: String
+    
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.caption2)
+            Text(text)
+                .font(.caption2.weight(.semibold))
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(
+            Capsule()
+                .fill(Color.blue.opacity(0.15))
+        )
+        .foregroundStyle(.blue)
+    }
+}
+
 // MARK: - Dynamic Auth ScrollView
 /// Reusable scroll view that adapts when keyboard appears
 /// - Shrinks logo/header when keyboard is visible

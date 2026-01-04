@@ -9,24 +9,28 @@ class NetworkLogger: ObservableObject {
     
     @Published var logs: [NetworkLog] = []
     @Published var isEnabled = true
+    @Published var isPaused = false  // Pause logging
     
     private let maxLogs = 100
     
     private init() {}
     
-    func log(_ message: String) {
-        guard isEnabled else { return }
+    func log(_ message: String, group: String? = nil) {
+        guard isEnabled && !isPaused else { return }
+        
+        let logMessage = group != nil ? "[\(group!)] \(message)" : message
+        
         let log = NetworkLog(
             timestamp: Date(),
             type: .info,
-            message: message
+            message: logMessage
         )
         addLog(log)
-        print(message)
+        print(logMessage)
     }
     
     func logRequest<B: Encodable>(_ request: URLRequest, body: B? = nil) {
-        guard isEnabled else { return }
+        guard isEnabled && !isPaused else { return }
         
         var message = "📤 REQUEST\n"
         message += "URL: \(request.url?.absoluteString ?? "nil")\n"
@@ -54,6 +58,11 @@ class NetworkLogger: ObservableObject {
         )
         addLog(log)
         print(message)
+    }
+    
+    // ⭐️ Overload without body (for GET requests)
+    func logRequest(_ request: URLRequest) {
+        logRequest(request, body: Optional<String>.none)
     }
     
     func logResponse(_ response: HTTPURLResponse, data: Data) {
@@ -151,6 +160,23 @@ struct NetworkLoggerView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
+                // Pause indicator banner
+                if logger.isPaused {
+                    HStack(spacing: 8) {
+                        Image(systemName: "pause.circle.fill")
+                        Text("Logging Paused")
+                            .font(.subheadline.weight(.semibold))
+                        Spacer()
+                        Text("Tap Resume to continue")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .foregroundStyle(.orange)
+                    .padding()
+                    .background(Color.orange.opacity(0.1))
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                }
+                
                 // Stats
                 HStack(spacing: 20) {
                     statView(
@@ -190,12 +216,32 @@ struct NetworkLoggerView: View {
             .navigationTitle("Network Logs")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        logger.isPaused.toggle()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: logger.isPaused ? "play.fill" : "pause.fill")
+                            Text(logger.isPaused ? "Resume" : "Pause")
+                                .font(.subheadline.weight(.medium))
+                        }
+                        .foregroundStyle(logger.isPaused ? .green : .orange)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(
+                            Capsule()
+                                .fill(logger.isPaused ? Color.green.opacity(0.15) : Color.orange.opacity(0.15))
+                        )
+                    }
+                }
+                
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Clear") {
                         logger.clear()
                     }
                 }
             }
+            .animation(.spring(response: 0.4), value: logger.isPaused)
             .sheet(item: $selectedLog) { log in
                 NavigationStack {
                     LogDetailView(log: log)

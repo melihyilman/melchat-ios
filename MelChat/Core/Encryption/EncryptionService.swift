@@ -116,6 +116,9 @@ struct EncryptedMessage: Codable {
 // MARK: - Errors
 
 enum EncryptionError: LocalizedError {
+    case noPrivateKey
+    case invalidPublicKey
+    case invalidCiphertext
     case invalidMessage
     case invalidKey
     case encryptionFailed
@@ -123,6 +126,12 @@ enum EncryptionError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
+        case .noPrivateKey:
+            return "Private key not found"
+        case .invalidPublicKey:
+            return "Invalid public key format"
+        case .invalidCiphertext:
+            return "Invalid ciphertext format"
         case .invalidMessage:
             return "Invalid message format"
         case .invalidKey:

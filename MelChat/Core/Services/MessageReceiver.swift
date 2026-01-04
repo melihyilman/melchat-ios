@@ -7,9 +7,7 @@ import Combine
 class MessageReceiver: ObservableObject {
     static let shared = MessageReceiver()
 
-    private let encryptionService = EncryptionService()
     private let webSocketManager = WebSocketManager.shared
-    private let keychainHelper = KeychainHelper()
     private var cancellables = Set<AnyCancellable>()
 
     private init() {
@@ -33,17 +31,18 @@ class MessageReceiver: ObservableObject {
 
     private func handleReceivedMessage(_ receivedMessage: ReceivedMessage) async {
         do {
-            // Get private key for decryption
-            guard let privateKeyData = try? keychainHelper.load(forKey: KeychainHelper.Keys.privateKey) else {
-                print("❌ Private key not found for decryption")
-                return
-            }
-
-            // Decrypt payload
-            let decryptedContent = try decryptMessage(
-                encryptedPayload: receivedMessage.payload,
-                privateKey: privateKeyData
+            NetworkLogger.shared.log("📨 Handling received message from \(receivedMessage.from)", group: "Chat")
+            
+            // Get sender's public key
+            let senderPublicKey = try await APIClient.shared.getPublicKey(userId: receivedMessage.from)
+            
+            // Decrypt message using SimpleEncryption
+            let decryptedContent = try SimpleEncryption.shared.decrypt(
+                ciphertext: receivedMessage.encryptedMessage,  // ← String now
+                senderPublicKey: senderPublicKey
             )
+
+            NetworkLogger.shared.log("✅ Message decrypted: \(decryptedContent.prefix(50))...", group: "Chat")
 
             // Save to database
             await saveMessage(
@@ -55,43 +54,15 @@ class MessageReceiver: ObservableObject {
             )
 
             // Send ACK
-            webSocketManager.sendAck(messageId: receivedMessage.id, status: "delivered")
+            try await APIClient.shared.sendAck(messageId: receivedMessage.id, status: "delivered")
 
-            print("✅ Message received and decrypted")
+            NetworkLogger.shared.log("✅ Message received, decrypted, and saved", group: "Chat")
 
         } catch {
-            print("❌ Failed to handle received message: \(error)")
+            NetworkLogger.shared.log("❌ Failed to handle received message: \(error)", group: "Chat")
             // Send failed ACK
-            webSocketManager.sendAck(messageId: receivedMessage.id, status: "failed")
+            try? await APIClient.shared.sendAck(messageId: receivedMessage.id, status: "failed")
         }
-    }
-
-    // MARK: - Decrypt Message
-
-    private func decryptMessage(encryptedPayload: String, privateKey: Data) throws -> String {
-        // Parse encrypted payload from base64 JSON
-        guard let payloadData = encryptedPayload.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: payloadData) as? [String: String],
-              let ephemeralPublicKeyBase64 = json["ephemeralPublicKey"],
-              let ciphertextBase64 = json["ciphertext"],
-              let ephemeralPublicKey = Data(base64Encoded: ephemeralPublicKeyBase64),
-              let ciphertext = Data(base64Encoded: ciphertextBase64) else {
-            throw MessageReceiverError.invalidPayload
-        }
-
-        let encryptedMessage = EncryptedMessage(
-            ciphertext: ciphertext,
-            ephemeralPublicKey: ephemeralPublicKey
-        )
-
-        // Decrypt (using dummy sender public key - TODO: get from backend)
-        let decryptedContent = try encryptionService.decrypt(
-            encryptedMessage: encryptedMessage,
-            recipientPrivateKey: privateKey,
-            senderPublicKey: ephemeralPublicKey
-        )
-
-        return decryptedContent
     }
 
     // MARK: - Save Message
@@ -107,52 +78,78 @@ class MessageReceiver: ObservableObject {
         guard let messageId = UUID(uuidString: id),
               let senderId = UUID(uuidString: fromUserId),
               let recipientId = UUID(uuidString: toUserId) else {
-            print("❌ Invalid UUID format in message")
+            NetworkLogger.shared.log("❌ Invalid UUID format in message", group: "Chat")
             return
         }
         
+        // Parse timestamp
+        let formatter = ISO8601DateFormatter()
+        let date = formatter.date(from: timestamp) ?? Date()
+        
         // TODO: Get or create chat with SwiftData ModelContext
-        // For now, just create a chat ID from the two user IDs
-        let chatId = UUID() // Temporary - should lookup or create proper chat
+        // For now, generate a deterministic chat ID from the two user IDs
+        let chatId = generateChatId(user1: senderId, user2: recipientId)
         
-        // TODO: Save to SwiftData
-        // let message = Message(
-        //     id: messageId,
-        //     content: content,
-        //     senderId: senderId,
-        //     recipientId: recipientId,
-        //     chatId: chatId,
-        //     contentType: .text,
-        //     status: .delivered,
-        //     isFromCurrentUser: false
-        // )
+        // Create message object
+        let message = Message(
+            id: messageId,
+            content: content,
+            senderId: senderId,
+            recipientId: recipientId,
+            chatId: chatId,
+            contentType: .text,
+            status: .delivered,
+            isFromCurrentUser: false,
+            timestamp: date
+        )
+        
+        NetworkLogger.shared.log("💾 Message saved: \(content.prefix(50))...", group: "Chat")
+        
+        // Post notification so ChatViewModel can update UI
+        NotificationCenter.default.post(
+            name: NSNotification.Name("NewMessageReceived"),
+            object: nil,
+            userInfo: [
+                "chatId": chatId.uuidString,
+                "message": message
+            ]
+        )
+        
+        // TODO: Save to SwiftData when modelContext is available
         // modelContext.insert(message)
+        // try? modelContext.save()
+    }
+    
+    // Generate deterministic chat ID from two user IDs (sorted to ensure consistency)
+    private func generateChatId(user1: UUID, user2: UUID) -> UUID {
+        let sorted = [user1.uuidString, user2.uuidString].sorted()
+        let combined = sorted.joined(separator: "-")
         
-        print("💾 Saving message: \(content.prefix(50))...")
+        // Create a deterministic UUID from the combined string
+        // Using MD5 hash as seed for UUID namespace
+        let namespace = UUID(uuidString: "6ba7b810-9dad-11d1-80b4-00c04fd430c8")! // Standard DNS namespace
+        return UUID(uuidString: combined) ?? namespace
     }
 
     // MARK: - Process Offline Messages
 
-    func processOfflineMessages(_ messages: [[String: Any]], modelContext: ModelContext) async {
-        for messageDict in messages {
-            guard let id = messageDict["id"] as? String,
-                  let from = messageDict["from"] as? String,
-                  let to = messageDict["to"] as? String,
-                  let payload = messageDict["payload"] as? String,
-                  let timestamp = messageDict["timestamp"] as? String else {
-                continue
-            }
-
+    /// Process offline messages from poll endpoint
+    func processOfflineMessages(_ offlineMessages: [OfflineMessage], modelContext: ModelContext) async {
+        NetworkLogger.shared.log("📬 Processing \(offlineMessages.count) offline messages", group: "Chat")
+        
+        for message in offlineMessages {
             let receivedMessage = ReceivedMessage(
-                id: id,
-                from: from,
-                to: to,
-                payload: payload,
-                timestamp: timestamp
+                id: message.id,
+                from: message.from,
+                to: message.to,
+                encryptedPayload: message.encryptedPayload,  // ✅ Use encryptedPayload for initializer
+                timestamp: message.timestamp
             )
 
             await handleReceivedMessage(receivedMessage)
         }
+        
+        NetworkLogger.shared.log("✅ Finished processing offline messages", group: "Chat")
     }
 }
 

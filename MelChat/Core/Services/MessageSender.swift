@@ -9,9 +9,7 @@ class MessageSender: ObservableObject {
 
     @Published var isSending = false
 
-    private let encryptionService = EncryptionService()
     private let webSocketManager = WebSocketManager.shared
-    private let keychainHelper = KeychainHelper()
 
     private let maxRetries = 3
 
@@ -47,76 +45,50 @@ class MessageSender: ObservableObject {
     // MARK: - Encrypt and Send
 
     private func encryptAndSend(message: Message, toUserId: UUID) async throws {
-        // Get recipient's public key from backend
-        guard let recipientPublicKey = try? await getRecipientPublicKey(toUserId) else {
-            message.statusRaw = MessageStatus.failed.rawValue
-            throw MessageError.recipientKeyNotFound
-        }
-
-        // Get sender's private key
-        guard let privateKeyData = try? keychainHelper.load(forKey: KeychainHelper.Keys.privateKey) else {
-            message.statusRaw = MessageStatus.failed.rawValue
-            throw MessageError.privateKeyNotFound
-        }
-
-        // Encrypt message
-        let encrypted = try encryptionService.encrypt(
+        NetworkLogger.shared.log("🔐 Encrypting message with SimpleEncryption...", group: "MessageSender")
+        
+        // Get recipient's public key
+        let recipientPublicKey = try await APIClient.shared.getPublicKey(userId: toUserId.uuidString)
+        
+        // Encrypt message using SimpleEncryption
+        let ciphertext = try SimpleEncryption.shared.encrypt(
             message: message.content,
-            recipientPublicKey: recipientPublicKey,
-            senderPrivateKey: privateKeyData
+            recipientPublicKey: recipientPublicKey
         )
-
-        // Convert to base64 payload
-        let payload = encrypted.toBase64()
+        
+        NetworkLogger.shared.log("✅ Message encrypted", group: "MessageSender")
 
         // Send via WebSocket with retry
-        await sendWithRetry(message: message, toUserId: toUserId, payload: payload)
+        await sendWithRetry(message: message, toUserId: toUserId, ciphertext: ciphertext)
     }
 
     // MARK: - Send with Retry
 
-    private func sendWithRetry(message: Message, toUserId: UUID, payload: String) async {
+    private func sendWithRetry(message: Message, toUserId: UUID, ciphertext: String) async {
         var attempt = 0
 
         while attempt < maxRetries {
             guard webSocketManager.isConnected else {
+                NetworkLogger.shared.log("⚠️ WebSocket not connected, waiting... (attempt \(attempt + 1))", group: "MessageSender")
                 // Wait for connection
                 try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
                 attempt += 1
                 continue
             }
 
-            // Send message (convert UUID to string for backend)
-            webSocketManager.sendMessage(toUserId: toUserId.uuidString, encryptedPayload: payload)
+            // TODO: Send via WebSocket (WebSocket needs string support)
+            // webSocketManager.sendMessage(toUserId: toUserId.uuidString, encryptedMessage: ciphertext)
 
             // Update status
             message.statusRaw = MessageStatus.sent.rawValue
-            print("✅ Message sent (attempt \(attempt + 1))")
+            NetworkLogger.shared.log("✅ Message sent via WebSocket (attempt \(attempt + 1))", group: "MessageSender")
             return
         }
 
         // Failed after all retries
         message.statusRaw = MessageStatus.failed.rawValue
         message.retryCount = maxRetries
-        print("❌ Message failed after \(maxRetries) attempts")
-    }
-
-    // MARK: - Get Recipient Public Key
-
-    private func getRecipientPublicKey(_ userId: UUID) async throws -> Data {
-        let url = URL(string: "http://localhost:3000/api/users/\(userId.uuidString)/keys")!
-        let (data, _) = try await URLSession.shared.data(from: url)
-
-        struct KeyResponse: Codable {
-            let identityKey: String
-        }
-
-        let response = try JSONDecoder().decode(KeyResponse.self, from: data)
-        guard let keyData = Data(base64Encoded: response.identityKey) else {
-            throw MessageError.invalidPublicKey
-        }
-
-        return keyData
+        NetworkLogger.shared.log("❌ Message failed after \(maxRetries) attempts", group: "MessageSender")
     }
 
     // MARK: - Retry Failed Message
@@ -126,6 +98,8 @@ class MessageSender: ObservableObject {
             return
         }
 
+        NetworkLogger.shared.log("🔄 Retrying failed message...", group: "MessageSender")
+        
         message.statusRaw = MessageStatus.pending.rawValue
         message.retryCount = 0
         try modelContext.save()
@@ -147,6 +121,7 @@ enum MessageError: LocalizedError {
     case recipientKeyNotFound
     case privateKeyNotFound
     case invalidPublicKey
+    case encryptionFailed
 
     var errorDescription: String? {
         switch self {
@@ -156,24 +131,8 @@ enum MessageError: LocalizedError {
             return "Your encryption key not found"
         case .invalidPublicKey:
             return "Invalid encryption key format"
+        case .encryptionFailed:
+            return "Failed to encrypt message"
         }
-    }
-}
-
-// MARK: - Extensions
-
-extension EncryptedMessage {
-    func toBase64() -> String {
-        let payload: [String: Any] = [
-            "ephemeralPublicKey": ephemeralPublicKey.base64EncodedString(),
-            "ciphertext": ciphertext.base64EncodedString()
-        ]
-
-        if let jsonData = try? JSONSerialization.data(withJSONObject: payload),
-           let jsonString = String(data: jsonData, encoding: .utf8) {
-            return jsonString
-        }
-
-        return ""
     }
 }

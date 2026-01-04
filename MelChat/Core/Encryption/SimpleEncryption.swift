@@ -137,28 +137,3 @@ class SimpleEncryption {
         return message
     }
 }
-
-// MARK: - Errors
-
-enum EncryptionError: LocalizedError {
-    case noPrivateKey
-    case invalidPublicKey
-    case invalidCiphertext
-    case encryptionFailed
-    case decryptionFailed
-    
-    var errorDescription: String? {
-        switch self {
-        case .noPrivateKey:
-            return "Private key not found"
-        case .invalidPublicKey:
-            return "Invalid public key format"
-        case .invalidCiphertext:
-            return "Invalid ciphertext format"
-        case .encryptionFailed:
-            return "Failed to encrypt message"
-        case .decryptionFailed:
-            return "Failed to decrypt message"
-        }
-    }
-}
