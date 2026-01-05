@@ -39,10 +39,15 @@ class VoiceRecorder: NSObject, ObservableObject {
     // MARK: - Recording
     
     func startRecording() async -> Bool {
-        // Request microphone permission
-        let granted = await withCheckedContinuation { continuation in
-            AVAudioSession.sharedInstance().requestRecordPermission { granted in
-                continuation.resume(returning: granted)
+        // Request microphone permission (iOS 17+)
+        let granted: Bool
+        if #available(iOS 17.0, *) {
+            granted = await AVAudioApplication.requestRecordPermission()
+        } else {
+            granted = await withCheckedContinuation { continuation in
+                AVAudioSession.sharedInstance().requestRecordPermission { granted in
+                    continuation.resume(returning: granted)
+                }
             }
         }
         
@@ -154,20 +159,24 @@ class VoiceRecorder: NSObject, ObservableObject {
     
     private func startTimer() {
         timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
-            guard let self = self else { return }
-            
-            if self.isRecording {
-                self.recordingDuration = Date().timeIntervalSince(self.startTime ?? Date())
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
+                
+                if self.isRecording {
+                    self.recordingDuration = Date().timeIntervalSince(self.startTime ?? Date())
+                }
             }
         }
     }
     
     private func startPlaybackTimer() {
         timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
-            guard let self = self,
-                  let player = self.audioPlayer else { return }
-            
-            self.playbackProgress = player.currentTime / player.duration
+            Task { @MainActor [weak self] in
+                guard let self = self,
+                      let player = self.audioPlayer else { return }
+                
+                self.playbackProgress = player.currentTime / player.duration
+            }
         }
     }
     
