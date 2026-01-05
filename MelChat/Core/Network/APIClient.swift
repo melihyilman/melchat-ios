@@ -55,70 +55,6 @@ class APIClient {
         let response: GetPublicKeyResponse = try await getWithAuth(endpoint: endpoint)
         return response.publicKey
     }
-    
-    // Upload Signal Protocol public key bundle (DEPRECATED - use uploadPublicKey)
-    func uploadSignalKeys(bundle: PublicKeyBundle) async throws {
-        let endpoint = "\(baseURL)/keys/upload"
-        
-        // Convert OneTimePrekey to OneTimePrekeyData
-        let prekeyData = bundle.oneTimePrekeys.map { prekey in
-            OneTimePrekeyData(id: prekey.id, publicKey: prekey.publicKey)
-        }
-        
-        let body = UploadSignalKeysRequest(
-            identityKey: bundle.identityKey,  // ✅ Ed25519 only
-            signedPrekey: bundle.signedPrekey,
-            signedPrekeySignature: bundle.signedPrekeySignature,
-            oneTimePrekeys: prekeyData
-        )
-        let _: UploadKeysResponse = try await postWithAuth(endpoint: endpoint, body: body)
-    }
-    
-    // Legacy endpoint (deprecated)
-    func uploadKeys(identityKey: String, signedPrekey: String, signedPrekeySignature: String) async throws {
-        let endpoint = "\(baseURL)/auth/upload-keys"
-        let body = UploadKeysRequest(
-            identityKey: identityKey,
-            signedPrekey: signedPrekey,
-            signedPrekeySignature: signedPrekeySignature
-        )
-        let _: UploadKeysResponse = try await postWithAuth(endpoint: endpoint, body: body)
-    }
-
-    // MARK: - Keys Endpoints
-
-    func uploadPublicKeys(bundle: PublicKeyBundle) async throws {
-        let endpoint = "\(baseURL)/keys/upload"
-        let body = UploadPublicKeysRequest(
-            identityKey: bundle.identityKey,
-            signedPrekey: bundle.signedPrekey,
-            signedPrekeySignature: bundle.signedPrekeySignature,
-            onetimePrekeys: bundle.oneTimePrekeys.map { $0.publicKey }
-        )
-        let _: KeyBundleResponse = try await postWithAuth(endpoint: endpoint, body: body)
-    }
-
-    func getUserPublicKeys(userId: String) async throws -> GetKeysResponse {
-        let endpoint = "\(baseURL)/keys/user/\(userId)"
-        return try await getWithAuth(endpoint: endpoint)
-    }
-
-    func getOwnPublicKeys() async throws -> GetKeysResponse {
-        let endpoint = "\(baseURL)/keys/me"
-        return try await getWithAuth(endpoint: endpoint)
-    }
-
-    func replenishPrekeys(prekeys: [String]) async throws {
-        let endpoint = "\(baseURL)/keys/replenish"
-        let body = ReplenishPrekeysRequest(prekeys: prekeys)
-        let _: KeyBundleResponse = try await postWithAuth(endpoint: endpoint, body: body)
-    }
-
-    func getPrekeyCount() async throws -> Int {
-        let endpoint = "\(baseURL)/keys/count"
-        let response: PrekeyCountResponse = try await getWithAuth(endpoint: endpoint)
-        return response.count
-    }
 
     // MARK: - Messaging Endpoints
 
@@ -132,20 +68,6 @@ class APIClient {
         }
         
         let body = SimpleEncryptedRequest(toUserId: toUserId, encryptedPayload: encryptedMessage)
-        return try await postWithAuth(endpoint: endpoint, body: body)
-    }
-    
-    // DEPRECATED - Old Signal Protocol version (uses object)
-    func sendEncryptedMessageOld(toUserId: String, encryptedPayload: EncryptedPayload) async throws -> SendMessageResponse {
-        let endpoint = "\(baseURL)/messages/send"
-        let body = SendMessageRequest(toUserId: toUserId, encryptedPayload: encryptedPayload)
-        return try await postWithAuth(endpoint: endpoint, body: body)
-    }
-    
-    // DEPRECATED - Use sendEncryptedMessage
-    func sendMessage(toUserId: String, encryptedPayload: EncryptedPayload) async throws -> SendMessageResponse {
-        let endpoint = "\(baseURL)/messages/send"
-        let body = SendMessageRequest(toUserId: toUserId, encryptedPayload: encryptedPayload)
         return try await postWithAuth(endpoint: endpoint, body: body)
     }
 
@@ -407,35 +329,8 @@ struct VerifyRequest: Codable {
     let displayName: String?
 }
 
-struct UploadKeysRequest: Codable {
-    let identityKey: String
-    let signedPrekey: String
-    let signedPrekeySignature: String
-}
-
-struct UploadSignalKeysRequest: Codable {
-    let identityKey: String  // ✅ Ed25519 (for signature verification)
-    let signedPrekey: String
-    let signedPrekeySignature: String
-    let oneTimePrekeys: [OneTimePrekeyData]
-}
-
-struct OneTimePrekeyData: Codable {
-    let id: String
-    let publicKey: String // Base64
-}
-
-struct EncryptedPayload: Codable {
-    let ciphertext: String
-    let ratchetPublicKey: String
-    let chainLength: Int
-    let previousChainLength: Int
-}
-
-struct SendMessageRequest: Codable {
-    let toUserId: String
-    let encryptedPayload: EncryptedPayload
-}
+// MARK: - Legacy Request Models (Deprecated - kept for reference)
+// These are no longer used - SimpleEncryption uses single public key
 
 struct SendAckRequest: Codable {
     let messageId: String
@@ -670,42 +565,8 @@ struct ErrorResponse: Codable {
     let error: String?
 }
 
-// MARK: - Keys Requests/Responses
-
-struct UploadPublicKeysRequest: Codable {
-    let identityKey: String
-    let signedPrekey: String
-    let signedPrekeySignature: String
-    let onetimePrekeys: [String]
-}
-
-struct GetKeysResponse: Codable {
-    let success: Bool
-    let keys: PublicKeyInfo
-}
-
-struct PublicKeyInfo: Codable {
-    let userId: String
-    let username: String
-    let identityKey: String
-    let signedPrekey: String
-    let signedPrekeySignature: String
-    let onetimePrekey: String?
-}
-
-struct KeyBundleResponse: Codable {
-    let success: Bool
-    let message: String?
-}
-
-struct ReplenishPrekeysRequest: Codable {
-    let prekeys: [String]
-}
-
-struct PrekeyCountResponse: Codable {
-    let success: Bool
-    let count: Int
-}
+// MARK: - Legacy Models (Deprecated - Kept for reference)
+// These are no longer used - SimpleEncryption uses single public key
 
 // MARK: - Errors
 

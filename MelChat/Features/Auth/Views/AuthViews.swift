@@ -113,7 +113,7 @@ struct LoginView: View {
                                     },
                                     onCompletion: { result in
                                         switch result {
-                                        case .success(let authorization):
+                                        case .success:
                                             // TODO: Handle Apple Sign In
                                             print("Apple Sign In Success")
                                         case .failure(let error):

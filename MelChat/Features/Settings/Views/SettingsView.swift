@@ -151,7 +151,7 @@ struct SettingsView: View {
                     HStack {
                         Text("Encryption")
                         Spacer()
-                        Text("Signal Protocol")
+                        Text("Curve25519 + AES-GCM")
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -315,18 +315,18 @@ struct EncryptionInfoView: View {
                 .padding()
             }
             
-            Section("Encryption Status") {
+            Section {
                 HStack {
                     Text("Protocol")
                     Spacer()
-                    Text("Signal Protocol")
+                    Text("Simple E2E")
                         .foregroundStyle(.secondary)
                 }
                 
                 HStack {
                     Text("Key Exchange")
                     Spacer()
-                    Text("X3DH + Double Ratchet")
+                    Text("ECDH (Curve25519)")
                         .foregroundStyle(.secondary)
                 }
                 
@@ -359,7 +359,7 @@ struct EncryptionInfoView: View {
                     Text("🔐 End-to-End Encrypted")
                         .font(.headline)
                     
-                    Text("Your messages are protected with Signal Protocol. Only you and the recipient can read them. Not even the server can decrypt your messages.")
+                    Text("Your messages are protected with Curve25519 + AES-GCM. Only you and the recipient can read them. Not even the server can decrypt your messages.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -371,13 +371,13 @@ struct EncryptionInfoView: View {
                     Button {
                         Task {
                             do {
-                                NetworkLogger.shared.log("🔑 Generating Signal Protocol keys...", group: "Encryption")
+                                NetworkLogger.shared.log("🔑 Generating encryption keys...", group: "Encryption")
                                 
-                                // Generate keys
-                                let keyBundle = try await SignalProtocolManager.shared.generateKeys()
+                                // Generate keys using SimpleEncryption
+                                let publicKey = SimpleEncryption.shared.generateKeys()
                                 
                                 // Upload to backend
-                                try await APIClient.shared.uploadSignalKeys(bundle: keyBundle)
+                                try await APIClient.shared.uploadPublicKey(publicKey: publicKey)
                                 
                                 hasKeys = true
                                 keyInfo = "Keys generated successfully"
@@ -404,8 +404,8 @@ struct EncryptionInfoView: View {
         .navigationTitle("Encryption")
         .navigationBarTitleDisplayMode(.inline)
         .task {
-            // Check if Signal Protocol keys exist
-            hasKeys = await SignalProtocolManager.shared.hasKeys()
+            // Check if encryption keys exist
+            hasKeys = SimpleEncryption.shared.hasKeys()
             if hasKeys {
                 keyInfo = "Active"
             } else {

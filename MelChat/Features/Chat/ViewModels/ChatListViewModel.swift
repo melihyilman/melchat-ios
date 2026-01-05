@@ -16,6 +16,26 @@ class ChatListViewModel: ObservableObject {
     private var modelContext: ModelContext?
     private var currentUserId: UUID?
     
+    // Notification observer
+    private var cancellables = Set<AnyCancellable>()
+    
+    init() {
+        setupNotificationListeners()
+    }
+    
+    // Setup notification listeners
+    private func setupNotificationListeners() {
+        // Listen for new messages to refresh chat list
+        NotificationCenter.default.publisher(for: NSNotification.Name("ChatListNeedsUpdate"))
+            .sink { [weak self] _ in
+                Task { @MainActor in
+                    await self?.loadChats()
+                    NetworkLogger.shared.log("🔄 Chat list refreshed after new message", group: "ChatList")
+                }
+            }
+            .store(in: &cancellables)
+    }
+    
     // Configure with SwiftData context
     func configure(modelContext: ModelContext, currentUserId: UUID) {
         self.modelContext = modelContext
@@ -129,8 +149,8 @@ class ChatListViewModel: ObservableObject {
                 senderId: senderUUID,
                 recipientId: currentUserId,
                 chatId: chatId,
-                contentType: .text,
-                status: .delivered,
+                contentType: MessageContentType.text,
+                status: MessageStatus.delivered,
                 isFromCurrentUser: false,
                 timestamp: Date()
             )

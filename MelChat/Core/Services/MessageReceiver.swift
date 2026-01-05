@@ -9,9 +9,20 @@ class MessageReceiver: ObservableObject {
 
     private let webSocketManager = WebSocketManager.shared
     private var cancellables = Set<AnyCancellable>()
+    
+    // ⭐️ SwiftData context - must be set by AppState on app launch
+    var modelContext: ModelContext?
+    var currentUserId: UUID?
 
     private init() {
         setupMessageListener()
+    }
+    
+    // Configure with SwiftData context
+    func configure(modelContext: ModelContext, currentUserId: UUID) {
+        self.modelContext = modelContext
+        self.currentUserId = currentUserId
+        NetworkLogger.shared.log("✅ MessageReceiver configured with SwiftData context", group: "Chat")
     }
 
     // MARK: - Setup Listener
@@ -86,8 +97,7 @@ class MessageReceiver: ObservableObject {
         let formatter = ISO8601DateFormatter()
         let date = formatter.date(from: timestamp) ?? Date()
         
-        // TODO: Get or create chat with SwiftData ModelContext
-        // For now, generate a deterministic chat ID from the two user IDs
+        // Get or create chat ID
         let chatId = generateChatId(user1: senderId, user2: recipientId)
         
         // Create message object
@@ -97,13 +107,24 @@ class MessageReceiver: ObservableObject {
             senderId: senderId,
             recipientId: recipientId,
             chatId: chatId,
-            contentType: .text,
-            status: .delivered,
+            contentType: MessageContentType.text,
+            status: MessageStatus.delivered,
             isFromCurrentUser: false,
             timestamp: date
         )
         
-        NetworkLogger.shared.log("💾 Message saved: \(content.prefix(50))...", group: "Chat")
+        // ⭐️ CRITICAL: Save to SwiftData
+        if let modelContext = modelContext {
+            modelContext.insert(message)
+            do {
+                try modelContext.save()
+                NetworkLogger.shared.log("💾 Message saved to SwiftData: \(content.prefix(50))...", group: "Chat")
+            } catch {
+                NetworkLogger.shared.log("❌ Failed to save message to SwiftData: \(error)", group: "Chat")
+            }
+        } else {
+            NetworkLogger.shared.log("⚠️ ModelContext not configured, message not saved!", group: "Chat")
+        }
         
         // Post notification so ChatViewModel can update UI
         NotificationCenter.default.post(
@@ -111,13 +132,15 @@ class MessageReceiver: ObservableObject {
             object: nil,
             userInfo: [
                 "chatId": chatId.uuidString,
-                "message": message
+                "messageId": messageId.uuidString
             ]
         )
         
-        // TODO: Save to SwiftData when modelContext is available
-        // modelContext.insert(message)
-        // try? modelContext.save()
+        // Also post notification for chat list to update
+        NotificationCenter.default.post(
+            name: NSNotification.Name("ChatListNeedsUpdate"),
+            object: nil
+        )
     }
     
     // Generate deterministic chat ID from two user IDs (sorted to ensure consistency)

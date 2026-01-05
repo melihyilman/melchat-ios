@@ -23,8 +23,7 @@ class SimpleEncryption {
         // Save to Keychain
         try? keychainHelper.save(
             keyPair.rawRepresentation,
-            forKey: "e2e.privateKey",
-            synchronizable: true
+            forKey: "e2e.privateKey"
         )
         
         NetworkLogger.shared.log("✅ Generated Curve25519 key pair", group: "Encryption")
@@ -135,5 +134,30 @@ class SimpleEncryption {
         NetworkLogger.shared.log("✅ Message decrypted: \(message.prefix(50))...", group: "Encryption")
         
         return message
+    }
+}
+
+// MARK: - Errors
+
+enum EncryptionError: LocalizedError {
+    case noPrivateKey
+    case invalidPublicKey
+    case invalidCiphertext
+    case encryptionFailed
+    case decryptionFailed
+    
+    var errorDescription: String? {
+        switch self {
+        case .noPrivateKey:
+            return "No private key available. Please generate keys first."
+        case .invalidPublicKey:
+            return "Invalid public key format"
+        case .invalidCiphertext:
+            return "Invalid ciphertext format"
+        case .encryptionFailed:
+            return "Failed to encrypt message"
+        case .decryptionFailed:
+            return "Failed to decrypt message"
+        }
     }
 }

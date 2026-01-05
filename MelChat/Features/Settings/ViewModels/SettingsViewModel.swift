@@ -15,79 +15,66 @@ class SettingsViewModel: ObservableObject {
     @Published var avatarURL: URL?
 
     func loadProfile() async {
-        guard let token = getToken() else { 
+        guard getToken() != nil else { 
             NetworkLogger.shared.log("⚠️ No auth token for profile load")
             return 
         }
 
         isLoading = true
 
-        do {
-            // TODO: Backend /users/me endpoint
-            // For MVP, load from Keychain/UserDefaults
-            
-            // Try to get username from UserDefaults (saved during registration)
-            if let savedUsername = UserDefaults.standard.string(forKey: "username") {
-                username = savedUsername
-            }
-            
-            if let savedDisplayName = UserDefaults.standard.string(forKey: "displayName") {
-                displayName = savedDisplayName
-            }
-            
-            if let savedEmail = UserDefaults.standard.string(forKey: "email") {
-                email = savedEmail
-            }
-            
-            showOnlineStatus = UserDefaults.standard.bool(forKey: "showOnlineStatus")
-            showReadReceipts = UserDefaults.standard.bool(forKey: "showReadReceipts")
-            
-            NetworkLogger.shared.log("✅ Profile loaded from local storage")
-            
-        } catch {
-            errorMessage = error.localizedDescription
-            NetworkLogger.shared.log("❌ Error loading profile: \(error)")
+        // TODO: Backend /users/me endpoint
+        // For MVP, load from Keychain/UserDefaults
+        
+        // Try to get username from UserDefaults (saved during registration)
+        if let savedUsername = UserDefaults.standard.string(forKey: "username") {
+            username = savedUsername
         }
+        
+        if let savedDisplayName = UserDefaults.standard.string(forKey: "displayName") {
+            displayName = savedDisplayName
+        }
+        
+        if let savedEmail = UserDefaults.standard.string(forKey: "email") {
+            email = savedEmail
+        }
+        
+        showOnlineStatus = UserDefaults.standard.bool(forKey: "showOnlineStatus")
+        showReadReceipts = UserDefaults.standard.bool(forKey: "showReadReceipts")
+        
+        NetworkLogger.shared.log("✅ Profile loaded from local storage")
 
         isLoading = false
     }
 
     func updateProfile() async {
-        guard let token = getToken() else { return }
+        guard getToken() != nil else { return }
 
         isLoading = true
         errorMessage = nil
 
-        do {
-            // TODO: Backend /users/me PATCH endpoint
-            // For MVP, save to UserDefaults
-            
-            UserDefaults.standard.set(displayName, forKey: "displayName")
-            UserDefaults.standard.set(showOnlineStatus, forKey: "showOnlineStatus")
-            UserDefaults.standard.set(showReadReceipts, forKey: "showReadReceipts")
-            
-            NetworkLogger.shared.log("✅ Profile updated locally")
-            
-            showSuccessMessage = true
-            HapticManager.shared.success()
-            
-            // Hide success message after 2 seconds
-            Task {
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
-                showSuccessMessage = false
-            }
-            
-        } catch {
-            errorMessage = error.localizedDescription
-            NetworkLogger.shared.log("❌ Error updating profile: \(error)")
-            HapticManager.shared.error()
+        // TODO: Backend /users/me PATCH endpoint
+        // For MVP, save to UserDefaults
+        
+        UserDefaults.standard.set(displayName, forKey: "displayName")
+        UserDefaults.standard.set(showOnlineStatus, forKey: "showOnlineStatus")
+        UserDefaults.standard.set(showReadReceipts, forKey: "showReadReceipts")
+        
+        NetworkLogger.shared.log("✅ Profile updated locally")
+        
+        showSuccessMessage = true
+        HapticManager.shared.success()
+        
+        // Hide success message after 2 seconds
+        Task {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            showSuccessMessage = false
         }
 
         isLoading = false
     }
     
     func uploadAvatar(image: UIImage) async {
-        guard let token = getToken() else { return }
+        guard getToken() != nil else { return }
         
         isLoading = true
         

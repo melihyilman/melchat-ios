@@ -24,15 +24,13 @@ class TokenManager {
         // Save access token
         try keychainHelper.save(
             accessToken.data(using: .utf8)!,
-            forKey: Keys.accessToken,
-            synchronizable: true
+            forKey: Keys.accessToken
         )
         
         // Save refresh token
         try keychainHelper.save(
             refreshToken.data(using: .utf8)!,
-            forKey: Keys.refreshToken,
-            synchronizable: true
+            forKey: Keys.refreshToken
         )
         
         // Calculate and save expiration date
@@ -40,8 +38,7 @@ class TokenManager {
         let expiresAtString = ISO8601DateFormatter().string(from: expiresAt)
         try keychainHelper.save(
             expiresAtString.data(using: .utf8)!,
-            forKey: Keys.tokenExpiresAt,
-            synchronizable: true
+            forKey: Keys.tokenExpiresAt
         )
         
         NetworkLogger.shared.log("✅ Tokens saved (expires in \(expiresIn)s)", group: "Auth")
@@ -90,8 +87,7 @@ class TokenManager {
             // Save new access token
             try keychainHelper.save(
                 response.accessToken.data(using: .utf8)!,
-                forKey: Keys.accessToken,
-                synchronizable: true
+                forKey: Keys.accessToken
             )
             
             // Update expiration
@@ -99,8 +95,7 @@ class TokenManager {
             let expiresAtString = ISO8601DateFormatter().string(from: expiresAt)
             try keychainHelper.save(
                 expiresAtString.data(using: .utf8)!,
-                forKey: Keys.tokenExpiresAt,
-                synchronizable: true
+                forKey: Keys.tokenExpiresAt
             )
             
             NetworkLogger.shared.log("✅ Access token refreshed", group: "Auth")

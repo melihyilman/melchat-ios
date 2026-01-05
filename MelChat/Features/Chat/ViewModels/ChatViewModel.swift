@@ -58,12 +58,12 @@ class ChatViewModel: ObservableObject {
                 
                 if notificationChatId == myChatId {
                     // Reload from SwiftData to get the new message
-                    /*Task { [weak self] @MainActor in
-                    guard let self else { return }
-                    await self.reloadMessagesFromDB()
-                    NetworkLogger.shared.log("✅ Reloaded messages after notification match", group: "Chat")
-                    HapticManager.shared.light()
-                    }*/
+                    Task { @MainActor [weak self] in
+                        guard let self else { return }
+                        await self.reloadMessagesFromDB()
+                        NetworkLogger.shared.log("✅ Reloaded messages after notification match", group: "Chat")
+                        HapticManager.shared.light()
+                    }
                 } else {
                     NetworkLogger.shared.log("⚠️ ChatId mismatch, ignoring notification", group: "Chat")
                 }
@@ -78,8 +78,9 @@ class ChatViewModel: ObservableObject {
         NetworkLogger.shared.log("🔄 Starting chat polling (every \(pollingInterval)s)", group: "Chat")
         
         pollingTimer = Timer.scheduledTimer(withTimeInterval: pollingInterval, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                await self?.reloadMessagesFromDB()
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                await self.reloadMessagesFromDB()
             }
         }
     }
@@ -99,16 +100,23 @@ class ChatViewModel: ObservableObject {
         
         do {
             let descriptor = FetchDescriptor<Message>(
-                predicate: #Predicate { $0.chatId == chatId },
-                sortBy: [SortDescriptor(\.timestamp, order: .forward)]
+                predicate: #Predicate<Message> { message in
+                    message.chatId == chatId
+                },
+                sortBy: [SortDescriptor<Message>(\.timestamp, order: SortOrder.forward)]
             )
             
             let fetchedMessages = try modelContext.fetch(descriptor)
             
-            // Only update if there are new messages
-            if fetchedMessages.count != messages.count {
-                messages = fetchedMessages
-                NetworkLogger.shared.log("📬 Updated chat view with \(messages.count) messages", group: "Chat")
+            // ⚡️ ALWAYS update messages and force UI refresh
+            let oldCount = messages.count
+            messages = fetchedMessages
+            
+            // Explicitly trigger objectWillChange to force SwiftUI update
+            objectWillChange.send()
+            
+            if fetchedMessages.count != oldCount {
+                NetworkLogger.shared.log("📬 Updated chat view: \(oldCount) → \(fetchedMessages.count) messages", group: "Chat")
             }
         } catch {
             NetworkLogger.shared.log("❌ Error reloading messages: \(error)", group: "Chat")
@@ -122,8 +130,8 @@ class ChatViewModel: ObservableObject {
         self.chatId = chatId
         
         // Load messages from local DB
-        Task { [weak self] in
-            await self?.loadMessagesFromLocalDB()
+        Task {
+            await self.loadMessagesFromLocalDB()
         }
     }
 
@@ -133,22 +141,27 @@ class ChatViewModel: ObservableObject {
     private func loadMessagesFromLocalDB() async {
         guard let modelContext = modelContext,
               let chatId = chatId else {
-            NetworkLogger.shared.log("⚠️ ModelContext or chatId not configured")
+            NetworkLogger.shared.log("⚠️ ModelContext or chatId not configured", group: "Chat")
             return
         }
         
         do {
             let descriptor = FetchDescriptor<Message>(
-                predicate: #Predicate { $0.chatId == chatId },
-                sortBy: [SortDescriptor(\.timestamp, order: .forward)]
+                predicate: #Predicate<Message> { message in
+                    message.chatId == chatId
+                },
+                sortBy: [SortDescriptor<Message>(\.timestamp, order: SortOrder.forward)]
             )
             
             let fetchedMessages = try modelContext.fetch(descriptor)
             messages = fetchedMessages
             
-            NetworkLogger.shared.log("✅ Loaded \(messages.count) messages from local DB")
+            // ⚡️ Force UI refresh
+            objectWillChange.send()
+            
+            NetworkLogger.shared.log("✅ Loaded \(messages.count) messages from local DB", group: "Chat")
         } catch {
-            NetworkLogger.shared.log("❌ Error loading from SwiftData: \(error)")
+            NetworkLogger.shared.log("❌ Error loading from SwiftData: \(error)", group: "Chat")
         }
     }
 
@@ -226,8 +239,8 @@ class ChatViewModel: ObservableObject {
                 senderId: currentUserId,
                 recipientId: recipientUUID,
                 chatId: chatId,
-                contentType: .text,
-                status: .sent,
+                contentType: MessageContentType.text,
+                status: MessageStatus.sent,
                 isFromCurrentUser: true,
                 timestamp: Date()
             )
@@ -236,10 +249,18 @@ class ChatViewModel: ObservableObject {
             modelContext.insert(newMessage)
             try modelContext.save()
             
-            // Reload messages from DB to update UI immediately
+            NetworkLogger.shared.log("💾 Message saved to local DB", group: "Chat")
+            
+            // ⚡️ IMMEDIATELY add to messages array (optimistic UI update)
+            messages.append(newMessage)
+            
+            // ⚡️ Force UI refresh
+            objectWillChange.send()
+            
+            // Then reload from DB to ensure consistency
             await reloadMessagesFromDB()
             
-            NetworkLogger.shared.log("💾 Message saved to local DB and UI updated", group: "Chat")
+            NetworkLogger.shared.log("✅ UI updated with new message", group: "Chat")
 
             // Success haptic
             HapticManager.shared.success()

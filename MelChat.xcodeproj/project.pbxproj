@@ -30,7 +30,11 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				ContentView.swift,
+				Core/Network/TESTFLIGHT_SETUP.md,
+				Features/Chat/ViewModels/check_duplicates.sh,
+				Features/Settings/ViewModels/PROJECT_STRUCTURE.md,
 				MelChatApp.swift,
+				PrivacyInfo.xcprivacy,
 				README.md,
 			);
 			target = D40022372EF8271200A962CE /* MelChat */;
@@ -303,7 +307,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = LXLATYPP3P;
+				DEVELOPMENT_TEAM = 6B5AVU2P9U;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -340,7 +344,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = LXLATYPP3P;
+				DEVELOPMENT_TEAM = 6B5AVU2P9U;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;

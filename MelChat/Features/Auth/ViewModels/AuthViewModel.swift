@@ -12,7 +12,6 @@ class AuthViewModel: ObservableObject {
     @Published var needsUsername = false  // ⭐️ NEW: Flag to show username input
 
     private let keychainHelper = KeychainHelper()
-    private let encryptionService = EncryptionService()
     weak var appState: AppState?
 
     func sendCode(email: String) async {
@@ -124,8 +123,7 @@ class AuthViewModel: ObservableObject {
             do {
                 try keychainHelper.save(
                     finalAccessToken.data(using: .utf8)!,
-                    forKey: KeychainHelper.Keys.authToken,
-                    synchronizable: true
+                    forKey: KeychainHelper.Keys.authToken
                 )
             } catch {
                 self.error = "Failed to save token"

@@ -64,8 +64,12 @@ class AppState: ObservableObject {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            NetworkLogger.shared.log("🚨 Force logout triggered - invalid refresh token", group: "Auth")
-            self?.logout()
+            guard let self = self else { return }
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
+                NetworkLogger.shared.log("🚨 Force logout triggered - invalid refresh token", group: "Auth")
+                self.logout()
+            }
         }
     }
 

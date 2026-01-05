@@ -471,7 +471,6 @@ struct ChatDetailView: View {
                                         insertion: .scale(scale: 0.8).combined(with: .opacity),
                                         removal: .opacity
                                     ))
-                                    .animation(.spring(response: 0.3, dampingFraction: 0.7), value: viewModel.messages.count)
                                     .id(message.id)
                             }
 
@@ -483,6 +482,7 @@ struct ChatDetailView: View {
                             }
                         }
                         .padding()
+                        .id(viewModel.messages.count) // ⚡️ Force refresh when count changes
                     }
                 }
                 .scrollDismissesKeyboard(.interactively)

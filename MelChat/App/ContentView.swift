@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject var appState: AppState
+    @Environment(\.modelContext) private var modelContext
     @State private var showDebugMenu = false
 
     var body: some View {
@@ -19,6 +20,26 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showDebugMenu) {
             NetworkLoggerView()
+        }
+        .task {
+            // ⭐️ Configure MessageReceiver with SwiftData context on app launch
+            if let userId = appState.currentUserId {
+                MessageReceiver.shared.configure(
+                    modelContext: modelContext,
+                    currentUserId: userId
+                )
+                NetworkLogger.shared.log("✅ MessageReceiver configured in ContentView", group: "App")
+            }
+        }
+        .onChange(of: appState.currentUserId) { _, newUserId in
+            // Re-configure when user logs in
+            if let userId = newUserId {
+                MessageReceiver.shared.configure(
+                    modelContext: modelContext,
+                    currentUserId: userId
+                )
+                NetworkLogger.shared.log("✅ MessageReceiver re-configured after login", group: "App")
+            }
         }
     }
 }

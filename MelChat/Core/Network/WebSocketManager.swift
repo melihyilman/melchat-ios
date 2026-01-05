@@ -197,9 +197,11 @@ class WebSocketManager: ObservableObject {
 
     private func startHeartbeat() {
         Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
-            guard self?.isConnected == true else { return }
-            let message = WebSocketMessage(type: "ping")
-            self?.send(message)
+            DispatchQueue.main.async {
+                guard self?.isConnected == true else { return }
+                let message = WebSocketMessage(type: "ping")
+                self?.send(message)
+            }
         }
     }
 
